@@ -28,6 +28,10 @@ process.env.DORMSYNC_ADMIN_KEY ||= 'test-admin-key'
 const database = createMemoryDatabase()
 let notificationInbox = []
 let notificationSequence = 0
+let notificationModes = {
+  ntfy: 'mock',
+  bark: 'mock',
+}
 const nativeFetch = global.fetch.bind(global)
 global.fetch = async (url, options = {}) => {
   if (String(url) === 'https://api.day.app/push') {
@@ -38,6 +42,22 @@ global.fetch = async (url, options = {}) => {
       // The real Bark service rejects malformed JSON.
     }
     const deviceKeys = Array.isArray(payload.device_keys) ? payload.device_keys : []
+    if (notificationModes.bark === 'real') {
+      const realResponse = await nativeFetch(url, options)
+      notificationSequence += 1
+      notificationInbox.unshift({
+        id: notificationSequence,
+        channel: 'bark',
+        title: String(payload.title || ''),
+        priority: String(payload.level || ''),
+        body: String(payload.body || ''),
+        receivedAt: new Date().toISOString(),
+        deviceCount: deviceKeys.length,
+        delivery: 'real',
+        delivered: realResponse.ok,
+      })
+      return realResponse
+    }
     notificationSequence += 1
     notificationInbox.unshift({
       id: notificationSequence,
@@ -47,6 +67,8 @@ global.fetch = async (url, options = {}) => {
       body: String(payload.body || ''),
       receivedAt: new Date().toISOString(),
       deviceCount: deviceKeys.length,
+      delivery: 'mock',
+      delivered: true,
     })
     return {
       ok: true,
@@ -72,6 +94,7 @@ restoreCloudBase()
 function resetDatabase() {
   for (const rows of database.data.values()) rows.splice(0, rows.length)
   notificationInbox = []
+  notificationModes = { ntfy: 'mock', bark: 'mock' }
 }
 
 async function invokeBackend(payload) {
@@ -135,6 +158,47 @@ const server = http.createServer(async (request, response) => {
     const title = titleMatch
       ? Buffer.from(titleMatch[1], 'base64').toString('utf8')
       : titleHeader
+    const topic = decodeURIComponent(String(request.url).slice('/ntfy/'.length))
+    if (notificationModes.ntfy === 'real') {
+      let realStatus = 200
+      let delivered = true
+      try {
+        const forwarded = await nativeFetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+          method: request.method,
+          headers: {
+            'content-type': String(
+              request.headers['content-type'] || 'text/plain; charset=utf-8',
+            ),
+            title: String(request.headers.title || ''),
+            priority: String(request.headers.priority || ''),
+            tags: String(request.headers.tags || ''),
+          },
+          body,
+        })
+        realStatus = forwarded.status
+        delivered = forwarded.ok
+      } catch {
+        realStatus = 502
+        delivered = false
+      }
+      notificationSequence += 1
+      notificationInbox.unshift({
+        id: notificationSequence,
+        channel: 'ntfy',
+        title,
+        priority: String(request.headers.priority || ''),
+        body,
+        receivedAt: new Date().toISOString(),
+        delivery: 'real',
+        delivered,
+      })
+      sendJson(
+        response,
+        { id: `local-${notificationSequence}`, delivered },
+        delivered ? realStatus : 502,
+      )
+      return
+    }
     notificationSequence += 1
     notificationInbox.unshift({
       id: notificationSequence,
@@ -143,6 +207,8 @@ const server = http.createServer(async (request, response) => {
       priority: String(request.headers.priority || ''),
       body,
       receivedAt: new Date().toISOString(),
+      delivery: 'mock',
+      delivered: true,
     })
     sendJson(response, { id: `local-${notificationSequence}` })
     return
@@ -180,7 +246,32 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (payload.action === '__testGetNotificationInbox') {
-    sendJson(response, { ok: true, data: { messages: notificationInbox } })
+    sendJson(response, {
+      ok: true,
+      data: { messages: notificationInbox, modes: notificationModes },
+    })
+    return
+  }
+
+  if (payload.action === '__testSetNotificationMode') {
+    const channel = String(payload.channel || '')
+    const mode = String(payload.mode || '')
+    if (
+      !Object.hasOwn(notificationModes, channel) ||
+      !['mock', 'real'].includes(mode)
+    ) {
+      sendJson(
+        response,
+        {
+          ok: false,
+          error: { code: 'INVALID_MODE', message: '通知模式无效' },
+        },
+        400,
+      )
+      return
+    }
+    notificationModes[channel] = mode
+    sendJson(response, { ok: true, data: { modes: notificationModes } })
     return
   }
 

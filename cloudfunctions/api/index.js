@@ -132,13 +132,6 @@ function isLocalTestMode() {
   return process.env.DORMSYNC_LOCAL_TEST_MODE === 'true'
 }
 
-const NTFY_STATUS_LABELS = {
-  sleep: '睡觉中',
-  normal: '正常活动',
-  focus: '专注学习',
-  away: '外出',
-}
-
 function ntfyServerUrl() {
   const value = String(process.env.DORMSYNC_NTFY_SERVER || NTFY_DEFAULT_SERVER)
     .trim()
@@ -319,46 +312,48 @@ function notificationTime(value, reference = new Date()) {
   return `${Number(targetParts.month)}月${Number(targetParts.day)}日 ${clock}`
 }
 
-function buildStatusNotification(member, previousStatus, nextStatus, state) {
-  const statusChanged = previousStatus?.status !== nextStatus.status
-  const label = NTFY_STATUS_LABELS[nextStatus.status]
-  const nickname = member.nickname
+function notificationSafeText(value) {
+  return String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function buildStatusNotification(member, nextStatus, state) {
+  const nickname = notificationSafeText(member.nickname) || '室友'
+  const note = notificationSafeText(nextStatus.note)
   const lines = []
 
-  if (statusChanged) {
-    if (nextStatus.status === 'sleep') lines.push(`${nickname}进入了睡觉中状态。`)
-    else if (nextStatus.status === 'focus') lines.push(`${nickname}开始专注学习。`)
-    else if (nextStatus.status === 'away') lines.push(`${nickname}已外出。`)
-    else lines.push(`${nickname}已恢复正常活动。`)
-  } else {
-    lines.push(`${nickname}更新了${label}状态信息。`)
-  }
+  if (nextStatus.status === 'sleep') lines.push(`💤 ${nickname} 正在睡觉`)
+  else if (nextStatus.status === 'focus') lines.push(`📚 ${nickname} 正在专注学习`)
+  else if (nextStatus.status === 'away') lines.push(`🚶 ${nickname} 已外出`)
+  else lines.push(`🏠 ${nickname} 已恢复正常活动`)
 
   if (nextStatus.endAt) {
     const formatted = notificationTime(nextStatus.endAt, new Date(nextStatus.updatedAt))
-    const timeLabel =
-      nextStatus.status === 'sleep'
-        ? '预计起床'
-        : nextStatus.status === 'focus'
-          ? '预计结束'
-          : '预计回寝'
-    if (formatted) lines.push(`${timeLabel}：${formatted}`)
+    if (formatted) {
+      if (nextStatus.status === 'sleep') lines.push(`⏰ 预计起床：${formatted}`)
+      else if (nextStatus.status === 'focus') lines.push(`⏰ 预计结束：${formatted}`)
+      else if (nextStatus.status === 'away') lines.push(`🏠 预计回寝：${formatted}`)
+    }
   }
 
   if (nextStatus.status === 'normal') {
     lines.push(
-      `更新时间：${notificationTime(nextStatus.updatedAt, new Date(nextStatus.updatedAt))}`,
+      `🕒 更新时间：${notificationTime(nextStatus.updatedAt, new Date(nextStatus.updatedAt))}`,
     )
   }
 
-  if (nextStatus.note) lines.push(`留言：${nextStatus.note}`)
+  if (note) lines.push(`💬 留言：${note}`)
 
   if (nextStatus.status === 'sleep' || nextStatus.status === 'focus') {
     const quietCount = state.statuses.filter(
       (item) => item.status === 'sleep' || item.status === 'focus',
     ).length
-    lines.push(`当前安静人数：${quietCount} / ${state.room.capacity}`)
-    lines.push('请尽量保持安静。')
+    lines.push(
+      `🤫 安静人数：${quietCount} / ${state.room.capacity}，请尽量保持安静。`,
+    )
   }
 
   return lines.join('\n')
@@ -1815,7 +1810,7 @@ async function handleUpdateStatus(event, member, currentDeviceId) {
   const room = await getRoom(member.roomId)
   if (!room) return ok(state)
 
-  const body = buildStatusNotification(member, previousStatus, status, state)
+  const body = buildStatusNotification(member, status, state)
   const delivery = await sendRoomNotification(room, NOTIFICATION_TITLE, body)
   return ok(
     delivery.ok
@@ -2345,6 +2340,11 @@ function requestClientIp(event) {
     String(forwarded).split(',')[0].trim() ||
     'unknown'
   )
+}
+
+exports.__testNotificationFormatting = {
+  buildStatusNotification,
+  notificationSafeText,
 }
 
 exports.cleanup = async () => {

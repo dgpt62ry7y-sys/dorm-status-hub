@@ -27,6 +27,13 @@ interface NotificationMessage {
   body: string
   receivedAt: string
   deviceCount?: number
+  delivery?: 'mock' | 'real'
+  delivered?: boolean
+}
+
+interface NotificationModes {
+  ntfy: 'mock' | 'real'
+  bark: 'mock' | 'real'
 }
 
 const enabled =
@@ -41,17 +48,25 @@ const errorMessage = ref('')
 const inbox = ref<NotificationMessage[]>([])
 const inboxLoading = ref(false)
 const inboxError = ref('')
+const changingMode = ref('')
+const notificationModes = ref<NotificationModes>({
+  ntfy: 'mock',
+  bark: 'mock',
+})
 const accounts = ref<TestAccount[]>(
   JSON.parse(localStorage.getItem(storageKey) || '[]') as TestAccount[],
 )
 const currentToken = localStorage.getItem(tokenKey) || ''
 const initialized = computed(() => accounts.value.length > 0)
 
-async function testAction(action: string): Promise<Record<string, unknown>> {
+async function testAction(
+  action: string,
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
   const response = await fetch(DORMSYNC_API_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, ...payload }),
   })
   const result = await response.json()
   if (!result.ok) throw new Error(result.error?.message || '测试操作失败')
@@ -64,10 +79,44 @@ async function loadInbox(): Promise<void> {
   try {
     const result = await testAction('__testGetNotificationInbox')
     inbox.value = (result.messages as NotificationMessage[]) || []
+    if (result.modes) {
+      notificationModes.value = result.modes as NotificationModes
+    }
   } catch (error) {
     inboxError.value = error instanceof Error ? error.message : '收件箱读取失败'
   } finally {
     inboxLoading.value = false
+  }
+}
+
+async function setNotificationMode(
+  channel: 'ntfy' | 'bark',
+  mode: 'mock' | 'real',
+): Promise<void> {
+  if (notificationModes.value[channel] === mode) return
+  if (
+    mode === 'real' &&
+    !window.confirm(
+      channel === 'bark'
+        ? '真实 Bark 模式会通过本机服务调用 api.day.app。Bark Key 会通过当前局域网连接提交，仅建议在可信 Wi-Fi 下测试。继续吗？'
+        : '真实 ntfy 模式会调用公开 ntfy.sh，并可能让已订阅该 Topic 的真实设备收到通知。继续吗？',
+    )
+  ) {
+    return
+  }
+
+  changingMode.value = channel
+  inboxError.value = ''
+  try {
+    const result = await testAction('__testSetNotificationMode', {
+      channel,
+      mode,
+    })
+    notificationModes.value = result.modes as NotificationModes
+  } catch (error) {
+    inboxError.value = error instanceof Error ? error.message : '通知模式切换失败'
+  } finally {
+    changingMode.value = ''
   }
 }
 
@@ -190,6 +239,65 @@ watch(open, (isOpen) => {
         </button>
       </div>
 
+      <section class="local-test__modes" aria-label="真实通知测试模式">
+        <header>
+          <span>真实推送测试</span>
+          <small>默认仅模拟</small>
+        </header>
+        <p>模拟模式只写入收件箱；真实模式会由本机服务转发到对应推送平台。</p>
+        <div class="local-test__mode-row">
+          <strong>ntfy</strong>
+          <div>
+            <button
+              type="button"
+              :class="{ active: notificationModes.ntfy === 'mock' }"
+              :disabled="changingMode === 'ntfy'"
+              @click="setNotificationMode('ntfy', 'mock')"
+            >
+              模拟
+            </button>
+            <button
+              type="button"
+              :class="{ active: notificationModes.ntfy === 'real' }"
+              :disabled="changingMode === 'ntfy'"
+              @click="setNotificationMode('ntfy', 'real')"
+            >
+              真实
+            </button>
+          </div>
+        </div>
+        <div class="local-test__mode-row">
+          <strong>Bark</strong>
+          <div>
+            <button
+              type="button"
+              :class="{ active: notificationModes.bark === 'mock' }"
+              :disabled="changingMode === 'bark'"
+              @click="setNotificationMode('bark', 'mock')"
+            >
+              模拟
+            </button>
+            <button
+              type="button"
+              :class="{ active: notificationModes.bark === 'real' }"
+              :disabled="changingMode === 'bark'"
+              @click="setNotificationMode('bark', 'real')"
+            >
+              真实
+            </button>
+          </div>
+        </div>
+        <p
+          v-if="
+            notificationModes.ntfy === 'real' ||
+            notificationModes.bark === 'real'
+          "
+          class="local-test__real-warning"
+        >
+          真实模式使用本机网络发送。ntfy Topic 或 Bark Key 会离开当前设备，请只在可信网络中使用。
+        </p>
+      </section>
+
       <section class="local-test__inbox" aria-label="本地通知收件箱">
         <header>
           <span>
@@ -220,16 +328,32 @@ watch(open, (isOpen) => {
 
         <p v-if="inboxError" class="local-test__inbox-error">{{ inboxError }}</p>
         <div v-else-if="inbox.length === 0" class="local-test__inbox-empty">
-          本地状态通知会出现在这里，不会发送到真实 ntfy.sh。
+          通知记录会出现在这里。切换到真实模式后，会先尝试发送，再记录发送结果。
         </div>
         <div v-else class="local-test__messages">
           <article v-for="message in inbox" :key="message.id">
             <div>
               <strong>{{ message.title }}</strong>
               <span v-if="message.channel === 'bark'">
-                Bark · {{ message.priority }} · {{ message.deviceCount }} 台
+                Bark · {{ message.priority }} · {{ message.deviceCount }} 台 ·
+                {{
+                  message.delivery === 'real'
+                    ? message.delivered === false
+                      ? '真实·失败'
+                      : '真实'
+                    : '模拟'
+                }}
               </span>
-              <span v-else>ntfy · Priority {{ message.priority }}</span>
+              <span v-else>
+                ntfy · Priority {{ message.priority }} ·
+                {{
+                  message.delivery === 'real'
+                    ? message.delivered === false
+                      ? '真实·失败'
+                      : '真实'
+                    : '模拟'
+                }}
+              </span>
             </div>
             <pre>{{ message.body }}</pre>
             <time :datetime="message.receivedAt">{{ formatInboxTime(message.receivedAt) }}</time>

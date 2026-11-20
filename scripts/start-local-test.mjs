@@ -27,7 +27,7 @@ const childEnv = {
   VITE_DORMSYNC_API_URL: '/dormsyncApi',
   VITE_LOCAL_TEST_MODE: 'true',
   DORMSYNC_NTFY_SERVER: `http://127.0.0.1:${apiPort}/ntfy`,
-  DORMSYNC_NTFY_PUBLIC_URL: `http://127.0.0.1:${apiPort}`,
+  DORMSYNC_NTFY_PUBLIC_URL: 'https://ntfy.sh',
 }
 
 const api = spawn(

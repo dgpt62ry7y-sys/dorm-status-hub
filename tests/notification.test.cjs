@@ -29,6 +29,8 @@ global.fetch = async (url, options = {}) => {
 }
 
 const backend = require(path.join(__dirname, '..', 'cloudfunctions', 'api', 'index.js'))
+const { buildStatusNotification, notificationSafeText } =
+  backend.__testNotificationFormatting
 restoreCloudBase()
 
 async function invoke(payload) {
@@ -56,6 +58,12 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(`${message}\nExpected:\n${expected}\nReceived:\n${actual}`)
+  }
+}
+
 function decodeNtfyTitle(value) {
   const match = /^=\?UTF-8\?B\?(.+)\?=$/i.exec(String(value || ''))
   return match ? Buffer.from(match[1], 'base64').toString('utf8') : String(value || '')
@@ -73,6 +81,123 @@ function beijingTomorrowAt(hour, minute) {
   const tomorrow = new Date(today + 86_400_000).toISOString().slice(0, 10)
   const clock = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
   return new Date(`${tomorrow}T${clock}:00+08:00`).toISOString()
+}
+
+function testNotificationFormatting() {
+  const member = { nickname: '小明' }
+  const state = {
+    room: { capacity: 4 },
+    statuses: [
+      { memberId: 'x', status: 'sleep' },
+      { memberId: 'm', status: 'focus' },
+    ],
+  }
+  const updatedAt = '2026-11-21T22:00:00+08:00'
+
+  assertEqual(
+    buildStatusNotification(
+      member,
+      {
+        status: 'sleep',
+        endAt: '2026-11-22T07:30:00+08:00',
+        note: '晚安',
+        updatedAt,
+      },
+      state,
+    ),
+    [
+      '💤 小明 正在睡觉',
+      '⏰ 预计起床：明天 07:30',
+      '💬 留言：晚安',
+      '🤫 安静人数：2 / 4，请尽量保持安静。',
+    ].join('\n'),
+    'Sleep formatting is incorrect',
+  )
+  assertEqual(
+    buildStatusNotification(
+      member,
+      { status: 'sleep', endAt: null, note: '', updatedAt },
+      state,
+    ),
+    ['💤 小明 正在睡觉', '🤫 安静人数：2 / 4，请尽量保持安静。'].join('\n'),
+    'Optional sleep lines were not omitted',
+  )
+  assertEqual(
+    buildStatusNotification(
+      member,
+      {
+        status: 'focus',
+        endAt: '2026-11-22T23:00:00+08:00',
+        note: '复习数学',
+        updatedAt,
+      },
+      state,
+    ),
+    [
+      '📚 小明 正在专注学习',
+      '⏰ 预计结束：明天 23:00',
+      '💬 留言：复习数学',
+      '🤫 安静人数：2 / 4，请尽量保持安静。',
+    ].join('\n'),
+    'Focus formatting is incorrect',
+  )
+  assertEqual(
+    buildStatusNotification(
+      member,
+      {
+        status: 'away',
+        endAt: '2026-11-22T20:00:00+08:00',
+        note: '去实验室',
+        updatedAt,
+      },
+      state,
+    ),
+    ['🚶 小明 已外出', '🏠 预计回寝：明天 20:00', '💬 留言：去实验室'].join(
+      '\n',
+    ),
+    'Away formatting is incorrect',
+  )
+  assertEqual(
+    buildStatusNotification(
+      member,
+      { status: 'away', endAt: null, note: '', updatedAt },
+      state,
+    ),
+    '🚶 小明 已外出',
+    'Away optional lines were not omitted',
+  )
+  assertEqual(
+    buildStatusNotification(
+      member,
+      { status: 'normal', endAt: null, note: '回寝了', updatedAt },
+      state,
+    ),
+    ['🏠 小明 已恢复正常活动', '🕒 更新时间：22:00', '💬 留言：回寝了'].join(
+      '\n',
+    ),
+    'Normal formatting is incorrect',
+  )
+  assertEqual(
+    notificationSafeText('小明\n📚\t第一行\r\n第二行'),
+    '小明 📚 第一行 第二行',
+    'Notification text cleanup is incorrect',
+  )
+  assertEqual(
+    buildStatusNotification(
+      { nickname: '小明\n📚' },
+      {
+        status: 'focus',
+        endAt: null,
+        note: '第一行\n第二行',
+        updatedAt,
+      },
+      state,
+    )
+      .split('\n')
+      .length,
+    3,
+    'Nickname or note injected an extra notification line',
+  )
 }
 
 async function createRoom(label, capacity = 4) {
@@ -113,6 +238,7 @@ async function updateStatus(memberToken, update, label) {
 }
 
 async function run() {
+  testNotificationFormatting()
   const suffix = String(Date.now()).slice(-6)
   const room = await createRoom(`通知测试${suffix}`)
   const roomId = room.state.room.id
@@ -227,14 +353,14 @@ async function run() {
     decodeNtfyTitle(message.headers.Title) === 'DormSync · 宿舍状态更新',
     'Notification title is incorrect',
   )
-  assert(message.body.includes('开始专注学习'), 'Focus notification copy is incorrect')
-  assert(message.body.includes('预计结束：明天 21:30'), 'Next-day focus time is incorrect')
-  assert(message.body.includes('留言：赶论文'), 'Focus note is missing')
+  assert(message.body.startsWith('📚 '), 'Focus notification emoji is incorrect')
+  assert(message.body.includes('正在专注学习'), 'Focus notification copy is incorrect')
+  assert(message.body.includes('⏰ 预计结束：明天 21:30'), 'Next-day focus time is incorrect')
+  assert(message.body.includes('💬 留言：赶论文'), 'Focus note is missing')
   assert(
-    message.body.includes('当前安静人数：3 / 4'),
+    message.body.includes('🤫 安静人数：3 / 4，请尽量保持安静。'),
     'Quiet count did not include sleep and focus',
   )
-  assert(message.body.includes('请尽量保持安静'), 'Quiet reminder is missing')
 
   const beforeNoteOnly = sentNotifications.length
   await updateStatus(
@@ -247,7 +373,9 @@ async function run() {
     'Note-only update did not send exactly one notification',
   )
   assert(
-    sentNotifications.at(-1).body.includes('更新了专注学习状态信息'),
+    sentNotifications.at(-1).body.startsWith('📚 ') &&
+      sentNotifications.at(-1).body.includes('正在专注学习') &&
+      sentNotifications.at(-1).body.includes('💬 留言：继续赶论文'),
     'Note-only update copy is incorrect',
   )
 
@@ -263,7 +391,7 @@ async function run() {
     'End-time-only update did not send exactly one notification',
   )
   assert(
-    sentNotifications.at(-1).body.includes('预计结束：明天 22:00'),
+    sentNotifications.at(-1).body.includes('⏰ 预计结束：明天 22:00'),
     'End-time-only notification is incorrect',
   )
 
@@ -284,8 +412,9 @@ async function run() {
     'sleep status',
   )
   message = sentNotifications.at(-1)
-  assert(message.body.includes('进入了睡觉中状态'), 'Sleep notification copy is incorrect')
-  assert(message.body.includes('预计起床：明天 07:30'), 'Sleep time is incorrect')
+  assert(message.body.startsWith('💤 '), 'Sleep notification emoji is incorrect')
+  assert(message.body.includes('正在睡觉'), 'Sleep notification copy is incorrect')
+  assert(message.body.includes('⏰ 预计起床：明天 07:30'), 'Sleep time is incorrect')
 
   await updateStatus(
     ownerToken,
@@ -293,9 +422,11 @@ async function run() {
     'away status',
   )
   message = sentNotifications.at(-1)
+  assert(message.body.startsWith('🚶 '), 'Away notification emoji is incorrect')
   assert(message.body.includes('已外出'), 'Away notification copy is incorrect')
-  assert(message.body.includes('预计回寝：明天 20:00'), 'Away return time is incorrect')
-  assert(!message.body.includes('当前安静人数'), 'Away notification included quiet count')
+  assert(message.body.includes('🏠 预计回寝：明天 20:00'), 'Away return time is incorrect')
+  assert(!message.body.includes('🤫'), 'Away notification included quiet count')
+  assert(!message.body.includes('安静人数'), 'Away notification included quiet copy')
 
   await updateStatus(
     ownerToken,
@@ -303,9 +434,10 @@ async function run() {
     'normal status',
   )
   message = sentNotifications.at(-1)
-  assert(message.body.includes('房主已恢复正常活动'), 'Normal notification copy is incorrect')
-  assert(message.body.includes('更新时间：'), 'Normal notification has no update time')
-  assert(!message.body.includes('当前安静人数'), 'Normal notification included quiet count')
+  assert(message.body.startsWith('🏠 '), 'Normal notification emoji is incorrect')
+  assert(message.body.includes('已恢复正常活动'), 'Normal notification copy is incorrect')
+  assert(message.body.includes('🕒 更新时间：'), 'Normal notification has no update time')
+  assert(!message.body.includes('🤫'), 'Normal notification included quiet count')
 
   notificationRequestOk = false
   const failedState = await updateStatus(
@@ -482,6 +614,7 @@ async function run() {
         legacyConcurrentInitialization: true,
         priorityAndRfc2047Title: true,
         fourStatusNotificationCopy: true,
+        emojiAndMultilineFormatting: true,
         noteAndEndTimeTriggers: true,
         unchangedStatusDoesNotNotify: true,
         quietCountUsesSleepAndFocus: true,
