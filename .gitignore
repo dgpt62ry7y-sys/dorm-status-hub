@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+coverage/
+.env
+.env.*
+!.env.example
+*.local
+work/
+outputs/
+.cloudbaserc.local.json

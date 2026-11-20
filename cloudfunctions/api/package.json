@@ -1,0 +1,12 @@
+{
+  "name": "dormsync-api",
+  "version": "1.6.1",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^4.2.1"
+  },
+  "overrides": {
+    "axios": "^1.21.1"
+  }
+}

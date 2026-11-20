@@ -1,0 +1,50 @@
+{
+  "name": "dormsync",
+  "private": true,
+  "version": "1.6.1",
+  "description": "A self-hosted roommate status-sharing web app for four- and six-person dorms.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dgpt62ry7y-sys/dorm-status-hub.git"
+  },
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/check-build-env.mjs",
+    "dev": "vite --host 0.0.0.0",
+    "preadmin": "node scripts/check-build-env.mjs",
+    "admin": "vite --config admin/vite.config.ts --host 127.0.0.1 --port 5176 --strictPort",
+    "dev:test": "node scripts/start-local-test.mjs",
+    "devtest": "node scripts/start-local-test.mjs",
+    "prebuild": "node scripts/check-build-env.mjs",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "predeploy": "npm run check:release",
+    "check:release": "node scripts/check-release-notes.mjs",
+    "test": "npm run test:account && npm run test:release && npm run test:auth && npm run test:notification && npm run test:update-log",
+    "test:account": "node tests/device-account.test.cjs",
+    "test:release": "node tests/release-notice.test.cjs",
+    "test:auth": "node tests/room-auth.test.cjs",
+    "test:notification": "node tests/notification.test.cjs",
+    "test:update-log": "node tests/update-log.test.cjs",
+    "deploy:api": "node scripts/deploy-cloudbase.mjs api",
+    "deploy:web": "node scripts/deploy-cloudbase.mjs web",
+    "deploy": "npm run build && npm run deploy:api && npm run deploy:web"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.77.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@cloudbase/cli": "^3.9.4",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.5",
+    "vue-tsc": "^3.3.14"
+  }
+}
