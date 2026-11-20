@@ -122,6 +122,6 @@ export const getStatusOption = (status: DormStatus): StatusOption =>
   STATUS_OPTIONS.find((option) => option.value === status) ?? STATUS_OPTIONS[2]
 
 export const isTimedStatus = (status: DormStatus): boolean =>
-  status === 'sleep' || status === 'focus'
+  status === 'sleep' || status === 'focus' || status === 'away'
 
 export const isQuietStatus = (status: DormStatus): boolean => status === 'sleep'

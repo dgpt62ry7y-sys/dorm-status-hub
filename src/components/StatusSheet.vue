@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { Clock, Moon, X } from 'lucide-vue-next'
 import StatusIcon from './StatusIcon.vue'
 import {
@@ -9,6 +9,7 @@ import {
   type StatusUpdate,
 } from '../types/dorm'
 import { buildEndAt, toDateTimeLocal } from '../utils/time'
+import { useDialogScrollLock } from '../composables/useDialogScrollLock'
 
 const props = defineProps<{
   open: boolean
@@ -27,6 +28,9 @@ const error = ref('')
 
 const option = computed(() => getStatusOption(props.status))
 const needsTime = computed(() => isTimedStatus(props.status))
+const requiresTime = computed(
+  () => props.status === 'sleep' || props.status === 'away',
+)
 const endAtInfo = computed(() => (time.value ? buildEndAt(time.value) : null))
 const isNextDay = computed(() => endAtInfo.value?.isNextDay ?? false)
 
@@ -55,8 +59,9 @@ function close(): void {
 }
 
 function submit(): void {
-  if (props.status === 'sleep' && !time.value) {
-    error.value = '请设置预计起床时间。'
+  if (requiresTime.value && !time.value) {
+    error.value =
+      props.status === 'away' ? '请设置预计回寝时间。' : '请设置预计起床时间。'
     timeTouched.value = true
     return
   }
@@ -76,7 +81,6 @@ function handleKeydown(event: KeyboardEvent): void {
 watch(
   () => props.open,
   (open) => {
-    document.body.style.overflow = open ? 'hidden' : ''
     if (open) resetForm()
   },
 )
@@ -91,8 +95,9 @@ watch(
 onMounted(() => window.addEventListener('keydown', handleKeydown))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleKeydown)
-  document.body.style.overflow = ''
 })
+
+useDialogScrollLock(toRef(props, 'open'))
 </script>
 
 <template>
@@ -127,13 +132,18 @@ onBeforeUnmount(() => {
             <label v-if="needsTime" class="field">
               <span class="field__label">
                 <Clock :size="16" stroke-width="1.8" aria-hidden="true" />
-                {{ status === 'sleep' ? '预计起床时间' : '预计结束时间' }}
-                <em v-if="status === 'sleep'">必填</em>
+                {{
+                  status === 'sleep'
+                    ? '预计起床时间'
+                    : status === 'away'
+                      ? '预计回寝时间'
+                      : '预计结束时间'
+                }}
+                <em v-if="requiresTime">必填</em>
               </span>
               <input
                 v-model="time"
                 type="time"
-                required
                 @change="timeTouched = true"
               />
               <span v-if="isNextDay" class="field__hint">
@@ -155,8 +165,8 @@ onBeforeUnmount(() => {
               ></textarea>
             </label>
 
-            <p v-if="error || (timeTouched && status === 'sleep' && !time)" class="form-error">
-              {{ error || '请设置预计起床时间。' }}
+            <p v-if="error || (timeTouched && requiresTime && !time)" class="form-error">
+              {{ error || (status === 'away' ? '请设置预计回寝时间。' : '请设置预计起床时间。') }}
             </p>
 
             <div class="status-sheet__actions">

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { ArrowRight, LoaderCircle, UsersRound, X } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
+import { useDialogScrollLock } from '../composables/useDialogScrollLock'
 import type { RoomCapacity } from '../types/dorm'
 
 const emit = defineEmits<{
@@ -20,6 +21,9 @@ const targetCapacity = computed(() => pendingCapacity.value)
 const isDowngrade = computed(
   () => targetCapacity.value === 4 && currentCapacity.value === 6,
 )
+const dialogVisible = computed(() => Boolean(pendingCapacity.value))
+
+useDialogScrollLock(dialogVisible)
 
 function openDialog(capacity: RoomCapacity): void {
   if (!isOwner.value || capacity === currentCapacity.value) return

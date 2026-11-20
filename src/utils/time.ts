@@ -8,6 +8,7 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
 })
 
 const relativeFormatter = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' })
+const LEGACY_EXPIRED_NOTE = '预计时间已结束'
 
 export function formatClock(value: string | Date | null): string {
   if (!value) return '未设置'
@@ -44,12 +45,14 @@ export function buildEndAt(time: string, now = new Date()): { endAt: string; isN
 }
 
 export function getEffectiveStatus(record: StatusRecord, now = new Date()): StatusRecord {
-  if (!record.endAt || new Date(record.endAt).getTime() > now.getTime()) return record
+  if (!record.endAt || new Date(record.endAt).getTime() > now.getTime()) {
+    return record.note === LEGACY_EXPIRED_NOTE ? { ...record, note: '' } : record
+  }
 
   return {
     ...record,
     status: 'normal',
-    note: '预计时间已结束',
+    note: '',
     endAt: null,
   }
 }
@@ -73,5 +76,6 @@ export function statusSummary(record: StatusRecord): string {
   const option = getStatusOption(record.status)
   if (record.status === 'sleep' && record.endAt) return `预计 ${formatClock(record.endAt)} 起床`
   if (record.status === 'focus' && record.endAt) return `预计 ${formatClock(record.endAt)} 结束`
+  if (record.status === 'away' && record.endAt) return `预计 ${formatClock(record.endAt)} 回寝`
   return option.description
 }

@@ -1534,8 +1534,10 @@ textarea:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow-y: auto;
   background: rgba(18, 18, 20, 0.52);
   backdrop-filter: blur(8px);
+  overscroll-behavior: contain;
 }
 
 .secret-dialog {
@@ -1548,6 +1550,7 @@ textarea:focus-visible {
   border-radius: 22px;
   background: #ffffff;
   box-shadow: 0 26px 80px rgba(17, 18, 20, 0.22);
+  overscroll-behavior: contain;
 }
 
 .capacity-dialog,
@@ -1562,6 +1565,7 @@ textarea:focus-visible {
   border-radius: 22px;
   background: #ffffff;
   box-shadow: 0 26px 80px rgba(17, 18, 20, 0.22);
+  overscroll-behavior: contain;
 }
 
 .release-notice-dialog {
@@ -1808,8 +1812,10 @@ textarea:focus-visible {
   align-items: flex-end;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
   background: rgba(18, 25, 22, 0.48);
   backdrop-filter: blur(4px);
+  overscroll-behavior: contain;
 }
 
 .status-sheet {
@@ -1821,6 +1827,8 @@ textarea:focus-visible {
   border-radius: 10px 10px 8px 8px;
   background: var(--surface);
   box-shadow: var(--shadow);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .status-sheet__handle {

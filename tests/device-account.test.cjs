@@ -100,6 +100,64 @@ async function run() {
     throw new Error('Second device status did not reach first device')
   }
 
+  expectError(
+    await invoke({
+      action: 'updateStatus',
+      memberToken: ownerToken,
+      status: 'away',
+      note: '去图书馆',
+      endAt: null,
+    }),
+    'END_TIME_REQUIRED',
+  )
+  const awayEnd = new Date(Date.now() + 60 * 60_000).toISOString()
+  const awayState = ok(
+    await invoke({
+      action: 'updateStatus',
+      memberToken: ownerToken,
+      status: 'away',
+      note: '去图书馆',
+      endAt: awayEnd,
+    }),
+    'update away status',
+  )
+  const awayRecord = awayState.statuses.find((status) => status.memberId === ownerMemberId)
+  if (awayRecord?.status !== 'away' || awayRecord.endAt !== awayEnd) {
+    throw new Error('Away return time was not stored')
+  }
+
+  const storedAway = database.data
+    .get('statuses')
+    .find((status) => status.memberId === ownerMemberId)
+  storedAway.endAt = new Date(Date.now() - 1000).toISOString()
+  const expiredAway = ok(
+    await invoke({ action: 'getState', memberToken: ownerToken }),
+    'expire away status',
+  )
+  const expiredAwayRecord = expiredAway.statuses.find(
+    (status) => status.memberId === ownerMemberId,
+  )
+  if (
+    expiredAwayRecord?.status !== 'normal' ||
+    expiredAwayRecord.note !== '' ||
+    expiredAwayRecord.endAt !== null
+  ) {
+    throw new Error('Expired away status did not clear note and return time')
+  }
+
+  storedAway.status = 'normal'
+  storedAway.note = '预计时间已结束'
+  storedAway.endAt = null
+  const cleanedLegacy = ok(
+    await invoke({ action: 'getState', memberToken: ownerToken }),
+    'clean legacy expiry note',
+  )
+  if (
+    cleanedLegacy.statuses.find((status) => status.memberId === ownerMemberId)?.note !== ''
+  ) {
+    throw new Error('Legacy expiry note was not removed')
+  }
+
   const firstList = ok(
     await invoke({ action: 'listDevices', memberToken: ownerToken }),
     'listDevices',
@@ -487,6 +545,9 @@ async function run() {
         recoveryCodeIssued: true,
         deviceBinding: true,
         crossDeviceSync: true,
+        awayReturnTimeRequired: true,
+        awayAutoExpiryClearsNote: true,
+        legacyExpiryNoteRemoved: true,
         currentDeviceMarker: true,
         recoveryRotation: true,
         expiredLinkRejected: true,

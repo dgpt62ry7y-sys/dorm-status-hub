@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
           </div>
           <div>
             <span>版本</span>
-            <strong>1.3.0 全站更新提示版</strong>
+            <strong>1.4.0 状态体验版</strong>
           </div>
         </section>
 

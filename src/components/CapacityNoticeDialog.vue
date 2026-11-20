@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { ArrowRight, LoaderCircle, UsersRound } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
+import { useDialogScrollLock } from '../composables/useDialogScrollLock'
 
 const {
   capacityNoticeDialog,
@@ -10,6 +11,8 @@ const {
 } = useDormStore()
 const saving = ref(false)
 const errorMessage = ref('')
+
+useDialogScrollLock(capacityNoticeVisible)
 
 const title = computed(() =>
   capacityNoticeDialog.value?.to === 6 ? '宿舍已升级为六人寝' : '宿舍已调整为四人寝',

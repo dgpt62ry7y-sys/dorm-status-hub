@@ -11,7 +11,9 @@ const VALID_ROOM_CAPACITIES = new Set([4, 6])
 const MAX_DEVICES = 5
 const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
-const TIMED_STATUSES = new Set(['sleep', 'focus'])
+const TIMED_STATUSES = new Set(['sleep', 'focus', 'away'])
+const REQUIRED_TIME_STATUSES = new Set(['sleep', 'away'])
+const LEGACY_EXPIRED_NOTE = '预计时间已结束'
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const COLLECTIONS = [
   'rooms',
@@ -276,7 +278,20 @@ async function expireStatuses(statuses) {
       Date.parse(status.endAt) <= now
 
     if (!expired) {
-      normalized.push(status)
+      if (status.note === LEGACY_EXPIRED_NOTE) {
+        const cleaned = {
+          ...status,
+          note: '',
+          updatedAt: nowIso(),
+        }
+        await db.collection('statuses').doc(status._id).update({
+          note: '',
+          updatedAt: cleaned.updatedAt,
+        })
+        normalized.push(cleaned)
+      } else {
+        normalized.push(status)
+      }
       continue
     }
 
@@ -284,7 +299,7 @@ async function expireStatuses(statuses) {
       ...status,
       status: 'normal',
       endAt: null,
-      note: '预计时间已结束',
+      note: '',
       updatedAt: nowIso(),
     }
     await db.collection('statuses').doc(status._id).update({
@@ -796,8 +811,11 @@ async function handleUpdateStatus(event, member, currentDeviceId) {
   if (!VALID_STATUSES.has(event.status)) {
     return fail('INVALID_STATUS', '状态无效')
   }
-  if (event.status === 'sleep' && !event.endAt) {
-    return fail('END_TIME_REQUIRED', '睡觉中需要设置预计起床时间')
+  if (REQUIRED_TIME_STATUSES.has(event.status) && !event.endAt) {
+    return fail(
+      'END_TIME_REQUIRED',
+      event.status === 'away' ? '外出需要设置预计回寝时间' : '睡觉中需要设置预计起床时间',
+    )
   }
 
   let endAt = null

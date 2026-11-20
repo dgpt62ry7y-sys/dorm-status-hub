@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { LoaderCircle, Sparkles } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
+import { useDialogScrollLock } from '../composables/useDialogScrollLock'
 
 const {
   releaseNoticeDialog,
@@ -10,6 +11,8 @@ const {
 } = useDormStore()
 const saving = ref(false)
 const errorMessage = ref('')
+
+useDialogScrollLock(releaseNoticeVisible)
 
 const versionRange = computed(() => {
   const notice = releaseNoticeDialog.value

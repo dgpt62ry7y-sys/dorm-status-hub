@@ -2,18 +2,19 @@
 
 一个面向四人或六人宿舍的轻量状态共享 Web App。成员通过邀请码加入同一个宿舍，实时查看彼此的休息、学习、活动和外出状态，减少因信息不同步造成的打扰。
 
-**在线地址：** <https://room433-d3gzju0tf27b2d998-1526277682.tcloudbaseapp.com/>
+**快速入口：** [在线体验](https://room433-d3gzju0tf27b2d998-1526277682.tcloudbaseapp.com/) · [自行部署指南](docs/self-hosting.md) · [架构说明](docs/architecture.md)
 
-**API 地址：**
-<https://room433-d3gzju0tf27b2d998-1526277682.ap-shanghai.app.tcloudbase.com/dormsyncApi>
+> **在线体验**使用项目维护者的 CloudBase 环境，资源费用由维护者承担，服务可用性不作永久保证。
+>
+> **自行部署**需要准备你自己的腾讯云 CloudBase 环境、PostgreSQL 和静态网站托管。网页、云函数和数据库均使用你的云资源，费用由部署者承担。
 
-> CloudBase 体验版默认域名首次访问时，需要等待约 20 秒并点击“确定访问”。这是平台测试域名的安全提示。
+项目代码可以自行获取、修改和部署，但当前仓库尚未声明开源许可证。公开仓库不等于自动授予复制、修改或再发布权利，许可证应由仓库维护者确认。
 
 ## 当前版本
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 版本 | `1.3.0` |
+| 版本 | `1.4.0` |
 | 发布状态 | 已部署到当前 CloudBase 环境 |
 | 发布形态 | 可长期使用的网页版，可在微信中直接发送链接 |
 | 单宿舍人数 | 四人寝或六人寝，由房主选择 |
@@ -40,7 +41,7 @@
   - 正常活动
   - 专注学习
   - 外出
-- 支持状态留言、预计结束时间与自动过期
+- 支持状态留言、预计结束时间、外出回寝时间与自动过期
 - 首页自动计算安静人数和预计安静结束时间
 - 每 5 秒自动同步，页面切回前台时立即刷新
 - 网络断开时保留最近数据并显示离线状态
@@ -92,9 +93,9 @@
 | 睡觉中 | 是 | 必填 |
 | 正常活动 | 否 | 不需要 |
 | 专注学习 | 否，单独显示学习提醒 | 可选 |
-| 外出 | 否 | 不需要 |
+| 外出 | 否 | 必填，到时间自动恢复正常活动 |
 
-安静人数只统计当前有效的“睡觉中”成员。状态到达结束时间后，前端会立即按正常活动显示，云函数在下次读取时也会执行服务端过期恢复。
+安静人数只统计当前有效的“睡觉中”成员。睡觉、专注学习和外出到达结束时间后，前端会立即按正常活动显示，云函数在下次读取时也会执行服务端过期恢复。到期后清空原留言。
 
 输入限制：
 
@@ -245,7 +246,7 @@ npm run check:release
 
 ## 环境变量
 
-`.env.local` 是可选配置。当前项目已带有线上环境默认值，本地开发不创建它也可以运行。
+`.env.local` 是本地和自行部署的必填配置。示例文件不包含维护者的真实环境值。
 
 Windows PowerShell：
 
@@ -266,50 +267,21 @@ VITE_CLOUDBASE_ENV_ID=your-env-id
 VITE_DORMSYNC_API_URL=https://your-api-domain/dormsyncApi
 ```
 
-更换 CloudBase 环境时，需要同时更新环境 ID 和 HTTP API 地址。`.env.local` 已被 `.gitignore` 忽略，不会随项目发布。
+`npm run dev` 和 `npm run build` 会先检查这两个变量。缺失、仍为占位值或 API 地址不是 HTTPS 时会直接停止。
+
+`.env.local` 已被 `.gitignore` 忽略，不会随项目发布。完整步骤见 [自行部署指南](docs/self-hosting.md)。
 
 ## 部署
 
-项目已将 `@cloudbase/cli` 安装为开发依赖。
+自行部署、CloudBase 资源准备、首次 API 部署、API 地址配置和静态网站发布，请按 [自行部署指南](docs/self-hosting.md) 操作。
 
-首次登录：
-
-```bash
-npx tcb login
-```
-
-构建并部署 HTTP 云函数与前端：
+项目维护者完成首次环境配置后，日常更新使用：
 
 ```bash
 npm run deploy
 ```
 
-`npm run deploy` 会依次完成生产构建、部署 `dormsyncHttp` 云函数和上传 `dist/` 静态文件。README 本身不会出现在部署产物中。
-
-部署前会自动执行 `predeploy` 检查。若 `package.json` 中的应用版本没有对应的用户更新摘要，部署会直接失败。
-
-也可以分开执行：
-
-```bash
-npm run deploy:api
-npm run deploy:web
-```
-
-部署配置位于 `cloudbaserc.json`。
-
-### 新环境部署
-
-如果更换 CloudBase 环境，需要：
-
-1. 创建 CloudBase 环境，并开通静态网站托管。
-2. 创建 PostgreSQL 共享实例并开启 Document 扩展。
-3. 修改 `cloudbaserc.json` 中的 `envId`。
-4. 创建 `.env.local`，填写新的环境 ID 和 API 地址。
-5. 使用 `npx tcb login` 登录对应云开发账号。
-6. 执行 `npm run deploy`。
-7. 在 CloudBase 控制台确认 HTTP 云函数网关路径为 `/dormsyncApi`。
-
-首次调用云函数时会自动创建 `rooms`、`members`、`statuses`、`deviceSessions` 和 `deviceLinks` 集合。
+部署脚本会从 `.env.local` 或 `CLOUDBASE_ENV_ID` 读取环境 ID，并显式传给云函数和静态托管命令。部署前还会校验版本更新摘要。
 
 ## 目录结构
 
@@ -318,6 +290,7 @@ npm run deploy:web
 ├── cloudfunctions/api/       # HTTP 云函数与服务端业务逻辑
 │   └── releases.cjs          # 各版本用户更新摘要
 ├── docs/architecture.md      # 架构说明
+├── docs/self-hosting.md      # 自行部署指南
 ├── public/                   # PWA manifest、字体、图标、Service Worker
 ├── src/api/                  # 前端 HTTP API 客户端
 ├── src/components/           # 页面组件
@@ -325,7 +298,7 @@ npm run deploy:web
 ├── src/config/               # CloudBase 环境配置
 ├── src/styles/               # 全局样式
 ├── src/views/                # 首页、成员、设置页面
-├── scripts/                  # 发布摘要等部署前检查
+├── scripts/                  # 环境、发布摘要和部署安全检查
 ├── tests/                    # 多设备账号集成测试与本地测试服务
 ├── .env.example              # 环境变量示例
 ├── cloudbaserc.json          # CloudBase 部署配置
@@ -357,6 +330,9 @@ npm run deploy:web
 - [x] 错过多个版本时合并为一份累计摘要
 - [x] 更新公告优先于房型通知并支持滚动
 - [x] 版本号与发布摘要缺失时阻止部署
+- [x] 弹窗滚动锁定与滚动优先级
+- [x] 外出必填回寝时间并自动恢复
+- [x] 睡觉、专注学习和外出到期后清空留言
 - [x] 320px、390px 和 1440px 页面布局
 - [x] 页面无控制台运行错误
 
@@ -414,9 +390,9 @@ npm run deploy:web
 
 ## 发布检查
 
-- [x] 本地 `1.3.0` 生产构建通过
-- [x] `dormsyncHttp` 云函数已部署 `1.3.0`
-- [x] 静态网站已部署 `1.3.0`
+- [x] 本地 `1.4.0` 生产构建通过
+- [x] `dormsyncHttp` 云函数已部署 `1.4.0`
+- [x] 静态网站已部署 `1.4.0`
 - [x] PostgreSQL 与 Document 扩展正常
 - [x] 两个不同浏览器完成创建、加入和状态同步
 - [x] 多设备绑定、恢复码和设备撤销流程通过
@@ -424,3 +400,14 @@ npm run deploy:web
 - [x] 发布目录未包含 `.env.local`、密钥或成员令牌文件
 - [ ] 发布后在微信中实际打开分享链接，确认平台提示和页面加载
 - [ ] 为 `2027-05-20` 的体验版到期时间设置续费或迁移提醒
+
+## 参与项目
+
+可以通过 GitHub Issue 或 Pull Request 反馈问题、讨论改进。提交代码前请先运行：
+
+```bash
+npm test
+npm run build
+```
+
+当前仓库尚未包含 `LICENSE`。是否采用 MIT、Apache-2.0 或其他许可证，需要由仓库维护者决定；仅有 Public 仓库状态本身不会自动授予复制、修改或再发布权利。

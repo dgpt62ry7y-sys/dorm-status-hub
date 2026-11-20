@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { Check, Copy, ShieldCheck, X } from 'lucide-vue-next'
+import { useDialogScrollLock } from '../composables/useDialogScrollLock'
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +25,8 @@ const emit = defineEmits<{
 
 const copied = ref(false)
 let copyTimer: number | undefined
+
+useDialogScrollLock(toRef(props, 'visible'))
 
 async function copyCode(): Promise<void> {
   try {
