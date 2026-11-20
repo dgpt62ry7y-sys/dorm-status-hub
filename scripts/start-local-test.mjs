@@ -44,6 +44,7 @@ const web = spawn(
     '127.0.0.1',
     '--port',
     String(webPort),
+    '--strictPort',
   ],
   {
     cwd: root,
