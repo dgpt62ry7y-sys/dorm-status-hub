@@ -15,16 +15,16 @@
 
 ## 数据
 
-CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
+CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 
-- `rooms`：宿舍名称、邀请码、创建者、四人或六人容量、房型变更通知和关闭状态。
+- `rooms`：宿舍名称、邀请码、创建者、四人或六人容量、房型变更通知、ntfy Topic 和关闭状态。
 - `members`：成员昵称、身份、恢复码哈希、容量通知投递状态、加入时间和活跃状态。
 - `statuses`：每个成员当前唯一的宿舍状态。
 - `deviceSessions`：成员账号下的设备令牌哈希、设备标签、最近在线和撤销状态。
 - `deviceLinks`：短时设备绑定码哈希、有效期和使用状态。
 - `releaseClaims`：全站版本公告的账号级领取和确认记录。
 - `securityAttempts`：短密钥错误尝试的限流窗口。
-- `systemSettings`：存量寝室授权迁移的兜底时间等系统配置。
+- `systemSettings`：存量寝室授权迁移兜底时间、ntfy Topic 惰性初始化抢占记录等系统配置。
 
 ## API
 
@@ -40,6 +40,9 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - `acknowledgeCapacityNotice` 记录其他成员已经确认房型变更。
 - `acknowledgeReleaseNotice` 记录成员已经确认全站版本更新公告。
 - `verifyExistingRoom` 校验存量寝室授权密钥。
+- `getNotificationSettings` 向已验证成员返回当前宿舍共享的 ntfy Topic。
+- `rotateNotificationTopic` 由房主生成新的通知 Topic。
+- `sendTestNotification` 由房主发送测试消息，同一宿舍一分钟最多一次。
 - `adminListRooms` 为本地只读管理站提供寝室级摘要，需要独立管理密钥。
 
 ## 权限
@@ -55,6 +58,22 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - 房型变更只向其他成员投递通知，且按成员账号只投递给最先访问的一台设备。
 - 全站版本公告按成员上次已读版本累计，只向最先访问的设备投递一次。
 - 新成员先保存恢复码，再读取从 `1.0.0` 开始的历史累计公告。
+- 只有房主可以轮换通知 Topic 或发送测试通知。
+
+## 宿舍通知
+
+- 每个宿舍生成一个 `dormsync-` 前缀的随机 Topic，由服务端保存。
+- 创建宿舍响应和普通 `getState` 不返回 Topic；只有通过成员令牌校验的 `getNotificationSettings` 会返回。
+- 存量宿舍首次读取通知设置时惰性生成 Topic，并用 `systemSettings` 唯一记录处理并发初始化。
+- 成员主动修改状态且 `status`、`note`、`endAt` 至少一项变化时发送一条通知。
+- 自动到期、后台同步、创建宿舍、改昵称和设备管理不会发送状态通知。
+- 通知失败不回滚状态；接口返回 `notificationWarning`，前端以非阻塞提示展示。
+- 所有通知使用 Priority 4；中文标题采用 RFC 2047 Base64 编码。
+- 时间统一按北京时间格式化；下一自然日显示“明天 HH:mm”。
+- 安静人数只统计当前有效的 `sleep` 和 `focus`，分母使用宿舍容量。
+- 成员退出或被移除后只标记房主需要轮换，不自动更换 Topic。
+
+Topic 在所选 ntfy 服务上是共享秘密，不提供真正的访问控制。知道 Topic 的人可以订阅、读取或伪造消息。昵称、留言、预计时间和安静人数会发送到部署者配置的 ntfy 服务。
 
 ## 寝室授权
 
@@ -63,12 +82,13 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - 功能上线前创建的寝室在房主首次访问时开始 12 小时验证期限。
 - 所有成员在验证完成前只能看到阻塞提示。
 - 上线 3 天后仍未被房主触发的存量寝室由 `dormsyncCleanup` 定时清理。
-- 清理会同时删除寝室、成员、状态、设备会话、设备绑定和公告领取记录。
+- 清理会同时删除寝室、成员、状态、设备会话、设备绑定、公告领取和该寝室的 Topic 抢占记录。
 
 ## 本地工具
 
 - `admin/` 是仅在本机运行的只读管理站，不进入正式静态网站构建。
 - `npm run dev:test` 使用内存数据库启动六账号测试环境。
+- 六账号测试环境把 ntfy 请求转发到本地收件箱，不访问真实 ntfy.sh。
 - 测试控制接口只存在于本地测试服务，不进入 CloudBase 云函数。
 
 ## 同步与到期
@@ -76,6 +96,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - 前端每 5 秒获取一次最新宿舍状态。
 - 页面切回前台时立即刷新。
 - 云函数读取时将已经到期的睡眠、学习或外出状态恢复正常活动，并清空旧留言。
+- 状态自动恢复正常活动不会触发 ntfy 通知。
 - 外出必须填写预计回寝时间；专注学习时间选填。
 - 网络失败时保留最近数据，并显示离线状态。
 

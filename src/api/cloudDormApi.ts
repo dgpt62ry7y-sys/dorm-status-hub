@@ -4,6 +4,7 @@ import type {
   DeviceListResult,
   DormState,
   DormStatus,
+  NotificationSettings,
   RevokeDeviceResult,
   RoomCapacity,
   StatusUpdate,
@@ -204,6 +205,24 @@ export const cloudDormApi = {
     return callApi<DormState>('verifyExistingRoom', {
       memberToken,
       creatorKey,
+    })
+  },
+
+  getNotificationSettings(memberToken: string) {
+    return callApi<NotificationSettings>('getNotificationSettings', {
+      memberToken,
+    })
+  },
+
+  rotateNotificationTopic(memberToken: string) {
+    return callApi<NotificationSettings>('rotateNotificationTopic', {
+      memberToken,
+    })
+  },
+
+  sendTestNotification(memberToken: string) {
+    return callApi<{ sent: true; sentAt: string }>('sendTestNotification', {
+      memberToken,
     })
   },
 }

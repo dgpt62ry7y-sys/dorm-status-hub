@@ -3,9 +3,11 @@ const {
   createMemoryDatabase,
   installCloudBaseMock,
 } = require('./support/memory-cloudbase.cjs')
+const releases = require(path.join(__dirname, '..', 'cloudfunctions', 'api', 'releases.cjs'))
 
 process.env.DORMSYNC_CREATOR_KEY = 'test-creator-key'
 process.env.DORMSYNC_ADMIN_KEY = 'test-admin-key'
+const currentReleaseVersion = releases.at(-1).version
 
 const database = createMemoryDatabase()
 const restoreCloudBase = installCloudBaseMock(database)
@@ -42,7 +44,7 @@ async function run() {
   if (
     !owner.state.releaseNotice ||
     owner.state.releaseNotice.fromVersion !== '1.0.0' ||
-    owner.state.releaseNotice.toVersion !== '1.5.1'
+    owner.state.releaseNotice.toVersion !== currentReleaseVersion
   ) {
     throw new Error('New owner did not receive the full release summary')
   }
@@ -115,7 +117,7 @@ async function run() {
   }
 
   const notice = delivered[0].result.data.releaseNotice
-  if (notice.fromVersion !== '1.1.0' || notice.toVersion !== '1.5.1') {
+  if (notice.fromVersion !== '1.1.0' || notice.toVersion !== currentReleaseVersion) {
     throw new Error('Release range does not match last seen version')
   }
   if (

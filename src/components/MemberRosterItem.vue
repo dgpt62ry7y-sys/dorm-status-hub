@@ -2,7 +2,12 @@
 import { computed } from 'vue'
 import { PencilLine } from 'lucide-vue-next'
 import StatusIcon from './StatusIcon.vue'
-import { getStatusOption, type Member, type StatusRecord } from '../types/dorm'
+import {
+  getStatusOption,
+  isQuietStatus,
+  type Member,
+  type StatusRecord,
+} from '../types/dorm'
 import { formatRelativeTime, statusSummary } from '../utils/time'
 
 const props = defineProps<{
@@ -28,7 +33,7 @@ const summaryParts = computed(() =>
     })),
 )
 const initial = computed(() => Array.from(props.member.nickname)[0] ?? '友')
-const isQuiet = computed(() => props.record.status === 'sleep')
+const isQuiet = computed(() => isQuietStatus(props.record.status))
 </script>
 
 <template>

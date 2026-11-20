@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Check, Info, LogOut, ShieldCheck, UserRound } from 'lucide-vue-next'
 import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
+import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
 import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
 import StatusIcon from '../components/StatusIcon.vue'
 import { useDormStore } from '../composables/useDormStore'
@@ -143,6 +144,8 @@ onBeforeUnmount(() => {
             {{ saving ? '正在保存…' : '保存设置' }}
           </button>
         </section>
+
+        <NotificationSettingsPanel @notify="showToast" />
 
         <AccountDevicePanel @notify="showToast" />
       </div>

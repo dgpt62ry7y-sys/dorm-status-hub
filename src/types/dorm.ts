@@ -47,6 +47,8 @@ export interface DormState {
     ownerId: string
     capacity: RoomCapacity
     memberCount?: number
+    notificationTopicUpdatedAt?: string | null
+    notificationTopicNeedsRotation?: boolean
   }
   members: Member[]
   statuses: StatusRecord[]
@@ -56,6 +58,7 @@ export interface DormState {
   roomVerification?: RoomVerification | null
   capacityNotice?: CapacityNotice | null
   releaseNotice?: ReleaseNotice | null
+  notificationWarning?: string | null
   preferences: {
     defaultStatus: DormStatus
   }
@@ -83,6 +86,17 @@ export interface DeviceListResult {
 export interface DeviceLinkResult {
   code: string
   expiresAt: string
+}
+
+export interface NotificationSettings {
+  serverUrl: string
+  topic: string
+  topicUpdatedAt: string | null
+  topicNeedsRotation: boolean
+  isOwner: boolean
+  roomName: string
+  androidDeepLink: string
+  installUrl: string
 }
 
 export interface RevokeDeviceResult extends DeviceListResult {
@@ -134,4 +148,5 @@ export const getStatusOption = (status: DormStatus): StatusOption =>
 export const isTimedStatus = (status: DormStatus): boolean =>
   status === 'sleep' || status === 'focus' || status === 'away'
 
-export const isQuietStatus = (status: DormStatus): boolean => status === 'sleep'
+export const isQuietStatus = (status: DormStatus): boolean =>
+  status === 'sleep' || status === 'focus'

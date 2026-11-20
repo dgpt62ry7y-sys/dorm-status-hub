@@ -6,7 +6,7 @@
 
 ### 在线体验
 
-README 中的在线地址由项目维护者提供。网页、云函数和数据库都运行在维护者的 CloudBase 环境里，维护者承担资源费用，并可能调整使用限制或停止演示服务。
+当前 README 不承诺固定的公共演示地址。如果维护者以后提供在线地址，网页、云函数和数据库会运行在维护者的 CloudBase 环境里，维护者承担资源费用，并可能调整使用限制或停止演示服务。
 
 ### 自行部署
 
@@ -30,6 +30,7 @@ README 中的在线地址由项目维护者提供。网页、云函数和数据�
 - 通过邀请码或链接邀请室友。
 - 共享睡觉、正常活动、专注学习和外出状态。
 - 设置状态留言、预计结束时间或回寝时间。
+- 为宿舍设置共享 ntfy 通知频道，在室友改状态时接收手机提醒。
 - 将同一个成员账号绑定到手机和电脑。
 - 使用账号恢复码、设备管理、容量调整和版本更新公告。
 
@@ -40,6 +41,7 @@ README 中的在线地址由项目维护者提供。网页、云函数和数据�
 1. `Vue 3` 前端，构建后部署到 CloudBase 静态网站托管。
 2. `dormsyncHttp` 云函数，处理成员、状态、邀请和设备身份。
 3. CloudBase PostgreSQL 的 Document 扩展，用于保存宿舍业务数据。
+4. 可选的 ntfy 服务，用于转发宿舍通知；默认使用公共 `https://ntfy.sh`。
 
 浏览器不会直接连接数据库。前端只通过 HTTPS 调用你自己的 `dormsyncHttp` HTTP API。
 
@@ -120,6 +122,8 @@ VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://your-api-domain/dormsyncApi
 DORMSYNC_CREATOR_KEY=你的寝室创建密钥
 DORMSYNC_ADMIN_KEY=你的本地管理密钥
+DORMSYNC_NTFY_SERVER=https://ntfy.sh
+DORMSYNC_NTFY_PUBLIC_URL=https://ntfy.sh
 ```
 
 不要提交 `.env.local`。项目的 `.gitignore` 已将它排除。
@@ -162,6 +166,8 @@ VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://你的网关地址/dormsyncApi
 DORMSYNC_CREATOR_KEY=你的寝室创建密钥
 DORMSYNC_ADMIN_KEY=你的本地管理密钥
+DORMSYNC_NTFY_SERVER=https://ntfy.sh
+DORMSYNC_NTFY_PUBLIC_URL=https://ntfy.sh
 ```
 
 ## 第七步：构建前端
@@ -203,6 +209,8 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - `deviceSessions`
 - `deviceLinks`
 - `releaseClaims`
+- `securityAttempts`
+- `systemSettings`
 
 这只会初始化项目内的集合，不会替你创建 CloudBase 环境、PostgreSQL 实例或 Document 扩展。
 
@@ -220,6 +228,8 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - [ ] 睡觉和外出必须设置时间。
 - [ ] 专注学习和外出可以填写留言。
 - [ ] 到期状态会恢复正常并清空旧留言。
+- [ ] 设置页可以读取宿舍 ntfy Topic，房主可以发送测试通知。
+- [ ] 修改状态后，订阅同一 Topic 的设备能收到 Priority 4 通知。
 - [ ] 首次调用 API 后数据库集合已创建。
 - [ ] 定时清理云函数 `dormsyncCleanup` 已创建。
 - [ ] CloudBase 账单归属于你自己的账号和环境。
@@ -250,6 +260,8 @@ npm run dev:test
 - 测试面板可以初始化一个六人寝和六个账号。
 - 点击账号可以在同一浏览器切换身份。
 - 可以重置全部虚拟数据。
+- 测试面板中的通知收件箱会显示标题、Priority、正文和时间。
+- 收件箱请求只发送到本机测试服务，不会访问真实 `ntfy.sh`。
 
 也可以在 Windows 双击 `启动本地工具.bat`，选择“启动六账号测试版”。启动器会检查 Node.js、项目依赖和 `.env.local`，但不会自动重复安装依赖。
 
@@ -273,6 +285,8 @@ npm run deploy
 5. 使用同一个环境 ID 部署静态网站。
 
 `dormsyncHttp` 与 `dormsyncCleanup` 会同时部署。创建密钥和管理密钥只通过部署时生成的临时配置写入 `dormsyncHttp` 环境变量，不会写入 `cloudbaserc.json`。
+
+如果配置了 `DORMSYNC_NTFY_SERVER` 和 `DORMSYNC_NTFY_PUBLIC_URL`，部署脚本也会把这两个值写入 `dormsyncHttp` 环境变量。生产环境应使用云函数可以访问、手机也能访问的 HTTP 或 HTTPS 地址。
 
 如果 API 网关地址发生变化，必须先更新 `.env.local` 的 `VITE_DORMSYNC_API_URL`，再重新构建。
 
@@ -353,8 +367,19 @@ CloudBase 默认测试域名首次访问时可能出现一次安全确认。具�
 - 用户成员令牌
 - 账号恢复码
 - 设备绑定码
+- 用户宿舍的 ntfy Topic
 
 前端只需要环境 ID 和公开 HTTP API 地址。
+
+## 宿舍通知的第三方边界
+
+- 默认通知服务是公共 `https://ntfy.sh`，不是本项目自建或托管的服务。
+- 每个宿舍的 Topic 由服务端随机生成，但 Topic 本身相当于共享秘密。
+- 知道 Topic 的人可以订阅、读取或伪造消息，不能把它当成强访问控制。
+- 昵称、留言、预计时间和安静人数会发送到部署者选择的 ntfy 服务。
+- 通知可能因手机后台限制、省电模式、网络或 ntfy 服务状态而延迟或失败。
+- 通知失败不会撤销已经保存的宿舍状态。
+- 如需更严格的数据边界，应自行部署并保护 ntfy 服务。
 
 ## 费用和数据边界
 

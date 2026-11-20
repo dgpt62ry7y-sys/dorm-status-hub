@@ -22,6 +22,7 @@ export interface SecretDialogState {
 }
 
 const TOKEN_KEY = 'dormsync:member-token:v1'
+const NOTIFICATION_TOPIC_SEEN_KEY = 'dormsync:notification-topic-seen:v1'
 const POLL_INTERVAL_MS = 5000
 
 function createEmptyState(): DormState {
@@ -59,6 +60,7 @@ const secretDialog = ref<SecretDialogState | null>(null)
 const capacityNoticeDialog = ref<CapacityNotice | null>(null)
 const releaseNoticeDialog = ref<ReleaseNotice | null>(null)
 const initialServerVersion = ref('')
+const notificationTopicUpdateAvailable = ref(false)
 
 let pollTimer: number | undefined
 let refreshInFlight: Promise<void> | null = null
@@ -69,6 +71,17 @@ let lastFocusRetryAt = 0
 
 function applyState(next: DormState): void {
   state.room = next.room
+  const topicUpdatedAt = next.room.notificationTopicUpdatedAt
+  const seenTopicUpdatedAt = localStorage.getItem(NOTIFICATION_TOPIC_SEEN_KEY)
+  const topicTimestamp = topicUpdatedAt ? Date.parse(topicUpdatedAt) : Number.NaN
+  const seenTimestamp = seenTopicUpdatedAt
+    ? Date.parse(seenTopicUpdatedAt)
+    : Number.NaN
+  notificationTopicUpdateAvailable.value = Boolean(
+    !Number.isFinite(topicTimestamp) ||
+      !Number.isFinite(seenTimestamp) ||
+      topicTimestamp > seenTimestamp,
+  )
   state.currentMemberId = next.currentMemberId
   state.currentDeviceId = next.currentDeviceId || ''
   state.serverVersion = next.serverVersion || ''
@@ -101,6 +114,7 @@ function clearSession(): void {
   capacityNoticeDialog.value = null
   releaseNoticeDialog.value = null
   initialServerVersion.value = ''
+  notificationTopicUpdateAvailable.value = false
   stopPolling()
 }
 
@@ -337,10 +351,12 @@ async function recoverAccount(recoveryCode: string): Promise<void> {
   }
 }
 
-async function saveStatus(update: StatusUpdate): Promise<void> {
+async function saveStatus(update: StatusUpdate): Promise<string | null> {
   const next = await cloudDormApi.updateStatus(memberToken.value, update)
+  const warning = next.notificationWarning || null
   applyState(next)
   isOnline.value = true
+  return warning
 }
 
 async function updateNickname(nickname: string): Promise<void> {
@@ -454,6 +470,37 @@ async function refreshToLatest(): Promise<void> {
   }
 }
 
+async function getNotificationSettings() {
+  const settings = await cloudDormApi.getNotificationSettings(memberToken.value)
+  state.room.notificationTopicUpdatedAt = settings.topicUpdatedAt
+  state.room.notificationTopicNeedsRotation = settings.topicNeedsRotation
+  return settings
+}
+
+async function rotateNotificationTopic() {
+  const settings = await cloudDormApi.rotateNotificationTopic(memberToken.value)
+  state.room.notificationTopicUpdatedAt = settings.topicUpdatedAt
+  state.room.notificationTopicNeedsRotation = settings.topicNeedsRotation
+  localStorage.setItem(
+    NOTIFICATION_TOPIC_SEEN_KEY,
+    settings.topicUpdatedAt || new Date().toISOString(),
+  )
+  notificationTopicUpdateAvailable.value = false
+  return settings
+}
+
+async function sendTestNotification() {
+  return cloudDormApi.sendTestNotification(memberToken.value)
+}
+
+function markNotificationTopicSeen(): void {
+  const updatedAt = state.room.notificationTopicUpdatedAt
+  if (updatedAt) {
+    localStorage.setItem(NOTIFICATION_TOPIC_SEEN_KEY, updatedAt)
+  }
+  notificationTopicUpdateAvailable.value = false
+}
+
 async function regenerateInvite(): Promise<string> {
   const result = await cloudDormApi.regenerateInvite(memberToken.value)
   applyState(result.state)
@@ -513,6 +560,7 @@ export function useDormStore() {
     releaseNoticeVisible,
     capacityNoticeVisible,
     updateAvailable,
+    notificationTopicUpdateAvailable,
     currentMember,
     memberCount,
     availableSeats,
@@ -541,6 +589,10 @@ export function useDormStore() {
     acknowledgeReleaseNotice,
     verifyExistingRoom,
     refreshToLatest,
+    getNotificationSettings,
+    rotateNotificationTopic,
+    sendTestNotification,
+    markNotificationTopicSeen,
     dismissSecretDialog,
     confirmSecretDialog,
     clearSession,

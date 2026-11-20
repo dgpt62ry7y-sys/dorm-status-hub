@@ -1,12 +1,29 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { FlaskConical, LoaderCircle, RotateCcw, Users, X } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import {
+  FlaskConical,
+  Inbox,
+  LoaderCircle,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-vue-next'
 import { DORMSYNC_API_URL } from '../config/cloudbase'
 
 interface TestAccount {
   memberId: string
   nickname: string
   memberToken: string
+}
+
+interface NotificationMessage {
+  id: number
+  title: string
+  priority: string
+  body: string
+  receivedAt: string
 }
 
 const enabled =
@@ -17,6 +34,9 @@ const tokenKey = 'dormsync:member-token:v1'
 const open = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
+const inbox = ref<NotificationMessage[]>([])
+const inboxLoading = ref(false)
+const inboxError = ref('')
 const accounts = ref<TestAccount[]>(
   JSON.parse(localStorage.getItem(storageKey) || '[]') as TestAccount[],
 )
@@ -32,6 +52,44 @@ async function testAction(action: string): Promise<Record<string, unknown>> {
   const result = await response.json()
   if (!result.ok) throw new Error(result.error?.message || '测试操作失败')
   return result.data
+}
+
+async function loadInbox(): Promise<void> {
+  inboxLoading.value = true
+  inboxError.value = ''
+  try {
+    const result = await testAction('__testGetNotificationInbox')
+    inbox.value = (result.messages as NotificationMessage[]) || []
+  } catch (error) {
+    inboxError.value = error instanceof Error ? error.message : '收件箱读取失败'
+  } finally {
+    inboxLoading.value = false
+  }
+}
+
+async function clearInbox(): Promise<void> {
+  inboxLoading.value = true
+  inboxError.value = ''
+  try {
+    await testAction('__testClearNotificationInbox')
+    inbox.value = []
+  } catch (error) {
+    inboxError.value = error instanceof Error ? error.message : '收件箱清空失败'
+  } finally {
+    inboxLoading.value = false
+  }
+}
+
+function formatInboxTime(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).format(date)
 }
 
 async function initialize(): Promise<void> {
@@ -70,6 +128,10 @@ function switchAccount(account: TestAccount): void {
   localStorage.setItem(tokenKey, account.memberToken)
   window.location.reload()
 }
+
+watch(open, (isOpen) => {
+  if (isOpen) void loadInbox()
+})
 </script>
 
 <template>
@@ -119,6 +181,50 @@ function switchAccount(account: TestAccount): void {
           <i v-if="account.memberToken === currentToken">当前</i>
         </button>
       </div>
+
+      <section class="local-test__inbox" aria-label="本地通知收件箱">
+        <header>
+          <span>
+            <Inbox :size="15" aria-hidden="true" />
+            通知收件箱
+            <i>{{ inbox.length }}</i>
+          </span>
+          <div>
+            <button
+              type="button"
+              aria-label="刷新通知收件箱"
+              :disabled="inboxLoading"
+              @click="loadInbox"
+            >
+              <LoaderCircle v-if="inboxLoading" class="spin" :size="14" aria-hidden="true" />
+              <RefreshCw v-else :size="14" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="清空通知收件箱"
+              :disabled="inboxLoading || inbox.length === 0"
+              @click="clearInbox"
+            >
+              <Trash2 :size="14" aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+
+        <p v-if="inboxError" class="local-test__inbox-error">{{ inboxError }}</p>
+        <div v-else-if="inbox.length === 0" class="local-test__inbox-empty">
+          本地状态通知会出现在这里，不会发送到真实 ntfy.sh。
+        </div>
+        <div v-else class="local-test__messages">
+          <article v-for="message in inbox" :key="message.id">
+            <div>
+              <strong>{{ message.title }}</strong>
+              <span>Priority {{ message.priority }}</span>
+            </div>
+            <pre>{{ message.body }}</pre>
+            <time :datetime="message.receivedAt">{{ formatInboxTime(message.receivedAt) }}</time>
+          </article>
+        </div>
+      </section>
 
       <p v-if="errorMessage" class="local-test__error">{{ errorMessage }}</p>
 

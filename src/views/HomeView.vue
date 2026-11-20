@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ArrowUpRight, Share2 } from 'lucide-vue-next'
+import { ArrowUpRight, BellRing, Share2, X } from 'lucide-vue-next'
 import AppToast from '../components/AppToast.vue'
 import MemberRosterItem from '../components/MemberRosterItem.vue'
 import QuietBanner from '../components/QuietBanner.vue'
@@ -23,6 +23,7 @@ const {
   memberCount,
   availableSeats,
   saveStatus,
+  notificationTopicUpdateAvailable,
 } = useDormStore()
 
 const now = ref(new Date())
@@ -30,6 +31,9 @@ const sheetOpen = ref(false)
 const sheetStatus = ref<DormStatus>('normal')
 const toastMessage = ref('')
 const toastVisible = ref(false)
+const notificationNudgeDismissedAt = ref(
+  localStorage.getItem('dormsync:notification-nudge-dismissed:v1') || '',
+)
 let clockTimer: number | undefined
 let toastTimer: number | undefined
 
@@ -58,12 +62,19 @@ const currentClock = computed(() =>
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+    hourCycle: 'h23',
   }).format(now.value),
 )
 const avatarMembers = computed(() =>
   [...state.members].sort((a, b) =>
     a.id === state.currentMemberId ? -1 : b.id === state.currentMemberId ? 1 : 0,
   ),
+)
+const showNotificationNudge = computed(
+  () =>
+    notificationTopicUpdateAvailable.value &&
+    notificationNudgeDismissedAt.value !==
+      (state.room.notificationTopicUpdatedAt || 'current'),
 )
 
 function recordFor(memberId: string) {
@@ -96,12 +107,12 @@ async function chooseStatus(status: DormStatus): Promise<void> {
   }
 
   try {
-    await saveStatus({
+    const warning = await saveStatus({
       status,
       note: '',
       endAt: null,
     })
-    showToast(`已更新为「${getStatusOption(status).label}」`)
+    showToast(warning || `已更新为「${getStatusOption(status).label}」`)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '状态更新失败，请重试')
   }
@@ -112,11 +123,17 @@ function openStatusSheet(status: DormStatus): void {
   sheetOpen.value = true
 }
 
+function dismissNotificationNudge(): void {
+  const marker = state.room.notificationTopicUpdatedAt || 'current'
+  notificationNudgeDismissedAt.value = marker
+  localStorage.setItem('dormsync:notification-nudge-dismissed:v1', marker)
+}
+
 async function submitStatus(update: StatusUpdate): Promise<void> {
   try {
-    await saveStatus(update)
+    const warning = await saveStatus(update)
     sheetOpen.value = false
-    showToast(`已更新为「${getStatusOption(update.status).label}」`)
+    showToast(warning || `已更新为「${getStatusOption(update.status).label}」`)
   } catch (error) {
     showToast(error instanceof Error ? error.message : '状态更新失败，请重试')
   }
@@ -187,6 +204,31 @@ onBeforeUnmount(() => {
     </section>
 
     <QuietBanner :statuses="state.statuses" :now="now" />
+
+    <aside v-if="showNotificationNudge" class="notification-nudge">
+      <RouterLink to="/settings" class="notification-nudge__main">
+        <span class="notification-nudge__icon" aria-hidden="true">
+          <BellRing :size="19" stroke-width="1.8" />
+        </span>
+        <span class="notification-nudge__copy">
+          <small>宿舍通知</small>
+          <strong>室友改状态时，把提醒发到手机</strong>
+          <p>每个宿舍共用一个独立频道，可在设置页复制或订阅。</p>
+        </span>
+        <span class="notification-nudge__action">
+          去开启
+          <ArrowUpRight :size="15" stroke-width="1.8" aria-hidden="true" />
+        </span>
+      </RouterLink>
+      <button
+        type="button"
+        class="notification-nudge__dismiss"
+        aria-label="暂时隐藏宿舍通知提醒"
+        @click="dismissNotificationNudge"
+      >
+        <X :size="15" aria-hidden="true" />
+      </button>
+    </aside>
 
     <div class="home-layout">
       <section class="status-section" aria-labelledby="status-heading">

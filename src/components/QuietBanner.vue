@@ -46,7 +46,7 @@ const latestEnd = computed(() => {
       <p class="quiet-banner__eyebrow">{{ hasQuiet ? '安静提醒' : '宿舍状态' }}</p>
       <h2>{{ hasQuiet ? '现在请保持安静' : '此刻可以正常交流' }}</h2>
       <p v-if="hasQuiet">
-        {{ quietRecords.length }} 人正在休息
+        {{ quietRecords.length }} 人正在睡觉或专注学习
         <span aria-hidden="true">·</span>
         {{
           hasUnknownEnd
@@ -54,12 +54,12 @@ const latestEnd = computed(() => {
             : `预计最晚 ${formatClock(latestEnd)} 结束`
         }}
       </p>
-      <p v-else>现在没有人处于睡眠状态。</p>
+      <p v-else>现在没有人处于睡觉中或专注学习状态。</p>
     </div>
 
     <div v-if="hasQuiet" class="quiet-banner__count" aria-label="安静人数">
       <AnimatedCount :value="quietRecords.length" />
-      <small>人休息</small>
+      <small>人安静</small>
     </div>
   </section>
 </template>

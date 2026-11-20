@@ -8,6 +8,8 @@ const {
 process.env.DORMSYNC_CREATOR_KEY = 'test-creator-key'
 process.env.DORMSYNC_ADMIN_KEY = 'test-admin-key'
 
+global.fetch = async () => ({ ok: true, status: 200 })
+
 const database = createMemoryDatabase()
 const restoreCloudBase = installCloudBaseMock(database)
 const backend = require(path.join(__dirname, '..', 'cloudfunctions', 'api', 'index.js'))

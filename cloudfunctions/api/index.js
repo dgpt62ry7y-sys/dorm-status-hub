@@ -14,6 +14,12 @@ const SECURITY_WINDOW_MS = 15 * 60 * 1000
 const MAX_SECURITY_ATTEMPTS = 5
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
+const NTFY_DEFAULT_SERVER = 'https://ntfy.sh'
+const NTFY_TOPIC_PREFIX = 'dormsync-'
+const NTFY_TIMEOUT_MS = 3_000
+const NTFY_TEST_COOLDOWN_MS = 60_000
+const NOTIFICATION_TITLE = 'DormSync · 宿舍状态更新'
+const NOTIFICATION_TEST_TITLE = 'DormSync · 宿舍通知测试'
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
 const TIMED_STATUSES = new Set(['sleep', 'focus', 'away'])
 const REQUIRED_TIME_STATUSES = new Set(['sleep', 'away'])
@@ -105,6 +111,212 @@ function compareVersions(left, right) {
 
 function deviceLabel(value) {
   return cleanText(value, 40) || '浏览器设备'
+}
+
+const NTFY_STATUS_LABELS = {
+  sleep: '睡觉中',
+  normal: '正常活动',
+  focus: '专注学习',
+  away: '外出',
+}
+
+function ntfyServerUrl() {
+  const value = String(process.env.DORMSYNC_NTFY_SERVER || NTFY_DEFAULT_SERVER)
+    .trim()
+    .replace(/\/+$/, '')
+  try {
+    const parsed = new URL(value)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid')
+    return value
+  } catch {
+    console.error('Invalid ntfy server configuration')
+    return NTFY_DEFAULT_SERVER
+  }
+}
+
+function ntfyPublicServerUrl() {
+  const value = String(
+    process.env.DORMSYNC_NTFY_PUBLIC_URL || ntfyServerUrl(),
+  )
+    .trim()
+    .replace(/\/+$/, '')
+  try {
+    const parsed = new URL(value)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid')
+    return value
+  } catch {
+    console.error('Invalid public ntfy server configuration')
+    return NTFY_DEFAULT_SERVER
+  }
+}
+
+function createNtfyTopic() {
+  return `${NTFY_TOPIC_PREFIX}${crypto.randomBytes(32).toString('base64url')}`
+}
+
+function validNtfyTopic(topic) {
+  return (
+    typeof topic === 'string' &&
+    topic.length > NTFY_TOPIC_PREFIX.length &&
+    topic.length <= 64 &&
+    /^[A-Za-z0-9_-]+$/.test(topic)
+  )
+}
+
+function encodeNtfyHeader(value) {
+  return `=?UTF-8?B?${Buffer.from(String(value), 'utf8').toString('base64')}?=`
+}
+
+function beijingDateParts(value) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(new Date(value))
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]))
+}
+
+function notificationTime(value, reference = new Date()) {
+  const target = new Date(value)
+  if (!Number.isFinite(target.getTime())) return ''
+  const targetParts = beijingDateParts(target)
+  const referenceParts = beijingDateParts(reference)
+  const targetDate = Date.UTC(
+    Number(targetParts.year),
+    Number(targetParts.month) - 1,
+    Number(targetParts.day),
+  )
+  const referenceDate = Date.UTC(
+    Number(referenceParts.year),
+    Number(referenceParts.month) - 1,
+    Number(referenceParts.day),
+  )
+  const difference = Math.round((targetDate - referenceDate) / 86_400_000)
+  const clock = `${targetParts.hour}:${targetParts.minute}`
+  if (difference === 0) return clock
+  if (difference === 1) return `明天 ${clock}`
+  return `${Number(targetParts.month)}月${Number(targetParts.day)}日 ${clock}`
+}
+
+function buildStatusNotification(member, previousStatus, nextStatus, state) {
+  const statusChanged = previousStatus?.status !== nextStatus.status
+  const label = NTFY_STATUS_LABELS[nextStatus.status]
+  const nickname = member.nickname
+  const lines = []
+
+  if (statusChanged) {
+    if (nextStatus.status === 'sleep') lines.push(`${nickname}进入了睡觉中状态。`)
+    else if (nextStatus.status === 'focus') lines.push(`${nickname}开始专注学习。`)
+    else if (nextStatus.status === 'away') lines.push(`${nickname}已外出。`)
+    else lines.push(`${nickname}已恢复正常活动。`)
+  } else {
+    lines.push(`${nickname}更新了${label}状态信息。`)
+  }
+
+  if (nextStatus.endAt) {
+    const formatted = notificationTime(nextStatus.endAt, new Date(nextStatus.updatedAt))
+    const timeLabel =
+      nextStatus.status === 'sleep'
+        ? '预计起床'
+        : nextStatus.status === 'focus'
+          ? '预计结束'
+          : '预计回寝'
+    if (formatted) lines.push(`${timeLabel}：${formatted}`)
+  }
+
+  if (nextStatus.status === 'normal') {
+    lines.push(
+      `更新时间：${notificationTime(nextStatus.updatedAt, new Date(nextStatus.updatedAt))}`,
+    )
+  }
+
+  if (nextStatus.note) lines.push(`留言：${nextStatus.note}`)
+
+  if (nextStatus.status === 'sleep' || nextStatus.status === 'focus') {
+    const quietCount = state.statuses.filter(
+      (item) => item.status === 'sleep' || item.status === 'focus',
+    ).length
+    lines.push(`当前安静人数：${quietCount} / ${state.room.capacity}`)
+    lines.push('请尽量保持安静。')
+  }
+
+  return lines.join('\n')
+}
+
+async function publishNtfyMessage(topic, title, body) {
+  if (!validNtfyTopic(topic)) return { ok: false }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), NTFY_TIMEOUT_MS)
+  try {
+    const response = await fetch(
+      `${ntfyServerUrl()}/${encodeURIComponent(topic)}`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          Title: encodeNtfyHeader(title),
+          Priority: '4',
+          Markdown: 'no',
+        },
+        body,
+        signal: controller.signal,
+      },
+    )
+    if (!response.ok) {
+      console.error('ntfy publish failed', { status: response.status })
+      return { ok: false }
+    }
+    return { ok: true }
+  } catch (error) {
+    console.error('ntfy publish failed', {
+      code: error?.cause?.code || error?.name || 'UNKNOWN',
+    })
+    return { ok: false }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function ensureRoomNtfyTopic(room) {
+  if (validNtfyTopic(room.ntfyTopic)) return room
+
+  const claimId = hashToken(`ntfy-topic:${room._id}`)
+  let claim = await getDocument('systemSettings', claimId)
+  if (!claim) {
+    const topic = createNtfyTopic()
+    const createdAt = nowIso()
+    try {
+      await db.collection('systemSettings').add({
+        _id: claimId,
+        roomId: room._id,
+        ntfyTopic: topic,
+        createdAt,
+      })
+    } catch (error) {
+      if (!isDuplicateRecordError(error)) throw error
+    }
+    claim = await getDocument('systemSettings', claimId)
+  }
+  if (!claim || !validNtfyTopic(claim.ntfyTopic)) {
+    throw new Error('NTFY_TOPIC_INITIALIZATION_FAILED')
+  }
+
+  const updatedAt = claim.createdAt || nowIso()
+  await db.collection('rooms').doc(room._id).update({
+    ntfyTopic: claim.ntfyTopic,
+    ntfyTopicUpdatedAt: updatedAt,
+  })
+  return {
+    ...room,
+    ntfyTopic: claim.ntfyTopic,
+    ntfyTopicUpdatedAt: updatedAt,
+  }
 }
 
 async function ensureCollections() {
@@ -546,7 +758,10 @@ async function buildState(
     getActiveMembers(member.roomId),
     getStatuses(member.roomId),
   ])
-  const statuses = await expireStatuses(rawStatuses)
+  const activeMemberIds = new Set(members.map((item) => item._id))
+  const statuses = (await expireStatuses(rawStatuses)).filter((item) =>
+    activeMemberIds.has(item.memberId),
+  )
   const seenAt = nowIso()
   const seenUpdates = [
     db.collection('members').doc(member._id).update({
@@ -572,6 +787,8 @@ async function buildState(
         ? room.capacity
         : DEFAULT_ROOM_CAPACITY,
       memberCount: members.length,
+      notificationTopicUpdatedAt: room.ntfyTopicUpdatedAt || null,
+      notificationTopicNeedsRotation: Boolean(room.ntfyTopicNeedsRotation),
     },
     currentMemberId: member._id,
     currentDeviceId,
@@ -697,6 +914,9 @@ async function handleCreateRoom(event) {
       closed: false,
       verificationStatus: 'verified',
       creatorKeyVerifiedAt: createdAt,
+      ntfyTopic: createNtfyTopic(),
+      ntfyTopicUpdatedAt: createdAt,
+      ntfyTopicNeedsRotation: false,
     })
     const roomId = insertedId(roomResult)
     const member = await insertMember(transaction, {
@@ -969,6 +1189,92 @@ async function handleRotateRecoveryCode(member) {
   return ok({ recoveryCode })
 }
 
+function notificationSettingsPayload(room, member) {
+  const topic = room.ntfyTopic
+  return {
+    serverUrl: ntfyPublicServerUrl(),
+    topic,
+    topicUpdatedAt: room.ntfyTopicUpdatedAt || null,
+    topicNeedsRotation: Boolean(room.ntfyTopicNeedsRotation),
+    isOwner: room.ownerId === member._id,
+    roomName: room.name,
+    androidDeepLink: `ntfy://${ntfyPublicServerUrl().replace(/^https?:\/\//, '')}/${topic}?display=${encodeURIComponent(room.name)}`,
+    installUrl: 'https://docs.ntfy.sh/subscribe/phone/',
+  }
+}
+
+async function handleGetNotificationSettings(member) {
+  let room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  room = await ensureRoomNtfyTopic(room)
+  return ok(notificationSettingsPayload(room, member))
+}
+
+async function handleRotateNotificationTopic(member) {
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId !== member._id) {
+    return fail('ONLY_OWNER', '只有房主可以重新生成通知频道')
+  }
+
+  const topic = createNtfyTopic()
+  const updatedAt = nowIso()
+  await db.collection('rooms').doc(member.roomId).update({
+    ntfyTopic: topic,
+    ntfyTopicUpdatedAt: updatedAt,
+    ntfyTopicNeedsRotation: false,
+    updatedAt,
+  })
+  await db.collection('systemSettings').doc(hashToken(`ntfy-topic:${room._id}`)).set({
+    roomId: room._id,
+    ntfyTopic: topic,
+    createdAt: updatedAt,
+  })
+
+  return ok(
+    notificationSettingsPayload(
+      {
+        ...room,
+        ntfyTopic: topic,
+        ntfyTopicUpdatedAt: updatedAt,
+        ntfyTopicNeedsRotation: false,
+      },
+      member,
+    ),
+  )
+}
+
+async function handleSendTestNotification(member) {
+  let room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId !== member._id) {
+    return fail('ONLY_OWNER', '只有房主可以发送测试通知')
+  }
+  const lastSentAt = Date.parse(room.lastNtfyTestAt || '')
+  if (Number.isFinite(lastSentAt) && Date.now() - lastSentAt < NTFY_TEST_COOLDOWN_MS) {
+    return fail('NOTIFICATION_RATE_LIMITED', '测试通知一分钟只能发送一次')
+  }
+
+  room = await ensureRoomNtfyTopic(room)
+  const body = [
+    '这是 DormSync 通知测试。',
+    `宿舍：${room.name}`,
+    `发送者：${member.nickname}`,
+  ].join('\n')
+  const sent = await publishNtfyMessage(
+    room.ntfyTopic,
+    NOTIFICATION_TEST_TITLE,
+    body,
+  )
+  if (!sent.ok) return fail('NOTIFICATION_SEND_FAILED', '测试通知发送失败')
+
+  const sentAt = nowIso()
+  await db.collection('rooms').doc(member.roomId).update({
+    lastNtfyTestAt: sentAt,
+  })
+  return ok({ sent: true, sentAt })
+}
+
 async function handleUpdateStatus(event, member, currentDeviceId) {
   if (!VALID_STATUSES.has(event.status)) {
     return fail('INVALID_STATUS', '状态无效')
@@ -994,22 +1300,48 @@ async function handleUpdateStatus(event, member, currentDeviceId) {
     .where({ memberId: member._id, roomId: member.roomId })
     .limit(1)
     .get()
+  const previousStatus = statusResult.data[0] || null
+  const note = cleanText(event.note, 30)
+  const updatedAt = nowIso()
   const status = {
     memberId: member._id,
     roomId: member.roomId,
     status: event.status,
-    note: cleanText(event.note, 30),
+    note,
     endAt,
-    updatedAt: nowIso(),
+    updatedAt,
   }
+  const changed =
+    previousStatus?.status !== status.status ||
+    (previousStatus?.note || '') !== status.note ||
+    (previousStatus?.endAt || null) !== status.endAt
 
-  if (statusResult.data[0]) {
-    await db.collection('statuses').doc(statusResult.data[0]._id).update(status)
+  if (previousStatus) {
+    await db.collection('statuses').doc(previousStatus._id).update(status)
   } else {
     await db.collection('statuses').add(status)
   }
 
-  return ok(await buildState(member, currentDeviceId))
+  const state = await buildState(member, currentDeviceId)
+  if (!state || !changed) return ok(state)
+
+  const room = await getRoom(member.roomId)
+  if (!room || !validNtfyTopic(room.ntfyTopic)) return ok(state)
+
+  const body = buildStatusNotification(member, previousStatus, status, state)
+  const sent = await publishNtfyMessage(
+    room.ntfyTopic,
+    NOTIFICATION_TITLE,
+    body,
+  )
+  return ok(
+    sent.ok
+      ? state
+      : {
+          ...state,
+          notificationWarning: '状态已保存，但宿舍通知发送失败',
+        },
+  )
 }
 
 async function handleUpdateProfile(event, member, currentDeviceId) {
@@ -1198,6 +1530,10 @@ async function handleRemoveMember(event, member, currentDeviceId) {
     removedAt: nowIso(),
     removedBy: member._id,
   })
+  await db.collection('rooms').doc(member.roomId).update({
+    ntfyTopicNeedsRotation: true,
+    updatedAt: nowIso(),
+  })
   await Promise.all([
     revokeMemberSessions(targetMemberId),
     revokeMemberDeviceLinks(targetMemberId),
@@ -1226,6 +1562,23 @@ async function handleLeaveRoom(member) {
   await db.collection('members').doc(member._id).update({
     active: false,
     leftAt: nowIso(),
+  })
+  const statusResult = await db
+    .collection('statuses')
+    .where({ memberId: member._id })
+    .limit(1)
+    .get()
+  if (statusResult.data[0]) {
+    await db.collection('statuses').doc(statusResult.data[0]._id).update({
+      status: 'normal',
+      note: '',
+      endAt: null,
+      updatedAt: nowIso(),
+    })
+  }
+  await db.collection('rooms').doc(member.roomId).update({
+    ntfyTopicNeedsRotation: true,
+    updatedAt: nowIso(),
   })
 
   if (room.ownerId === member._id) {
@@ -1283,6 +1636,7 @@ async function deleteRoomRecords(room) {
     deleteCollectionRows('deviceLinks', { roomId: room._id }),
     deleteCollectionRows('members', { roomId: room._id }),
     deleteCollectionRows('releaseClaims', { roomId: room._id }),
+    deleteCollectionRows('systemSettings', { roomId: room._id }),
   ])
   await db.collection('rooms').doc(room._id).delete()
 }
@@ -1448,6 +1802,15 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'rotateRecoveryCode') {
       return await handleRotateRecoveryCode(member)
+    }
+    if (event.action === 'getNotificationSettings') {
+      return await handleGetNotificationSettings(member)
+    }
+    if (event.action === 'rotateNotificationTopic') {
+      return await handleRotateNotificationTopic(member)
+    }
+    if (event.action === 'sendTestNotification') {
+      return await handleSendTestNotification(member)
     }
     return fail('UNKNOWN_ACTION', '未知操作')
   } catch (error) {

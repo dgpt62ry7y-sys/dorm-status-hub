@@ -26,12 +26,15 @@ try {
 process.env.DORMSYNC_CREATOR_KEY ||= 'test-creator-key'
 process.env.DORMSYNC_ADMIN_KEY ||= 'test-admin-key'
 const database = createMemoryDatabase()
+let notificationInbox = []
+let notificationSequence = 0
 const restoreCloudBase = installCloudBaseMock(database)
 const backend = require(path.join(__dirname, '..', '..', 'cloudfunctions', 'api', 'index.js'))
 restoreCloudBase()
 
 function resetDatabase() {
   for (const rows of database.data.values()) rows.splice(0, rows.length)
+  notificationInbox = []
 }
 
 async function invokeBackend(payload) {
@@ -89,6 +92,24 @@ const server = http.createServer(async (request, response) => {
     // The real backend handles malformed request bodies.
   }
 
+  if (String(request.url || '').startsWith('/ntfy/')) {
+    const titleHeader = String(request.headers.title || '')
+    const titleMatch = /^=\?UTF-8\?B\?(.+)\?=$/i.exec(titleHeader)
+    const title = titleMatch
+      ? Buffer.from(titleMatch[1], 'base64').toString('utf8')
+      : titleHeader
+    notificationSequence += 1
+    notificationInbox.unshift({
+      id: notificationSequence,
+      title,
+      priority: String(request.headers.priority || ''),
+      body,
+      receivedAt: new Date().toISOString(),
+    })
+    sendJson(response, { id: `local-${notificationSequence}` })
+    return
+  }
+
   if (payload.action === '__testResetReleaseNotice') {
     const tokenHash = crypto
       .createHash('sha256')
@@ -117,6 +138,17 @@ const server = http.createServer(async (request, response) => {
   if (payload.action === '__testResetAll') {
     resetDatabase()
     sendJson(response, { ok: true, data: { reset: true } })
+    return
+  }
+
+  if (payload.action === '__testGetNotificationInbox') {
+    sendJson(response, { ok: true, data: { messages: notificationInbox } })
+    return
+  }
+
+  if (payload.action === '__testClearNotificationInbox') {
+    notificationInbox = []
+    sendJson(response, { ok: true, data: { cleared: true } })
     return
   }
 

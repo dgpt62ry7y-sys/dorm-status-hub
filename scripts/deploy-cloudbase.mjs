@@ -12,6 +12,14 @@ const envId = env.CLOUDBASE_ENV_ID || env.VITE_CLOUDBASE_ENV_ID
 const apiUrl = env.VITE_DORMSYNC_API_URL
 const creatorKey = env.DORMSYNC_CREATOR_KEY
 const adminKey = env.DORMSYNC_ADMIN_KEY
+const ntfyServer = String(env.DORMSYNC_NTFY_SERVER || 'https://ntfy.sh')
+  .trim()
+  .replace(/\/+$/, '')
+const ntfyPublicUrl = String(
+  env.DORMSYNC_NTFY_PUBLIC_URL || ntfyServer,
+)
+  .trim()
+  .replace(/\/+$/, '')
 
 if (!['api', 'web'].includes(target)) {
   throw new Error('Usage: node scripts/deploy-cloudbase.mjs <api|web>')
@@ -32,6 +40,14 @@ if (
 ) {
   throw new Error(
     'DORMSYNC_CREATOR_KEY and DORMSYNC_ADMIN_KEY must be configured in .env.local before deploying the API.',
+  )
+}
+if (
+  target === 'api' &&
+  (!/^https?:\/\//i.test(ntfyServer) || !/^https?:\/\//i.test(ntfyPublicUrl))
+) {
+  throw new Error(
+    'DORMSYNC_NTFY_SERVER and DORMSYNC_NTFY_PUBLIC_URL must be valid HTTP or HTTPS URLs.',
   )
 }
 
@@ -110,7 +126,14 @@ if (dryRun) {
         envId,
         localConfigPath: target === 'api' ? localConfigPath : null,
         envVariableNames:
-          target === 'api' ? ['DORMSYNC_CREATOR_KEY', 'DORMSYNC_ADMIN_KEY'] : [],
+          target === 'api'
+            ? [
+                'DORMSYNC_CREATOR_KEY',
+                'DORMSYNC_ADMIN_KEY',
+                'DORMSYNC_NTFY_SERVER',
+                'DORMSYNC_NTFY_PUBLIC_URL',
+              ]
+            : [],
         commands: commands.map((args) => [process.execPath, cli, ...args]),
         dryRun: true,
       },
@@ -133,6 +156,8 @@ if (target === 'api') {
     ...(httpFunction.envVariables || {}),
     DORMSYNC_CREATOR_KEY: creatorKey,
     DORMSYNC_ADMIN_KEY: adminKey,
+    DORMSYNC_NTFY_SERVER: ntfyServer,
+    DORMSYNC_NTFY_PUBLIC_URL: ntfyPublicUrl,
   }
   await writeFile(
     localConfigPath,
