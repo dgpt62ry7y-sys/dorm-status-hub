@@ -42,7 +42,7 @@ async function run() {
   if (
     !owner.state.releaseNotice ||
     owner.state.releaseNotice.fromVersion !== '1.0.0' ||
-    owner.state.releaseNotice.toVersion !== '1.5.0'
+    owner.state.releaseNotice.toVersion !== '1.5.1'
   ) {
     throw new Error('New owner did not receive the full release summary')
   }
@@ -115,7 +115,7 @@ async function run() {
   }
 
   const notice = delivered[0].result.data.releaseNotice
-  if (notice.fromVersion !== '1.1.0' || notice.toVersion !== '1.5.0') {
+  if (notice.fromVersion !== '1.1.0' || notice.toVersion !== '1.5.1') {
     throw new Error('Release range does not match last seen version')
   }
   if (

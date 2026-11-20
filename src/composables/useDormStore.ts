@@ -65,6 +65,7 @@ let refreshInFlight: Promise<void> | null = null
 let devicesRequestInFlight: Promise<void> | null = null
 let lifecycleBound = false
 let initialized = false
+let lastFocusRetryAt = 0
 
 function applyState(next: DormState): void {
   state.room = next.room
@@ -168,6 +169,42 @@ function bindLifecycle(): void {
   window.addEventListener('offline', () => {
     isOnline.value = false
   })
+  window.addEventListener('focus', () => {
+    if (
+      phase.value === 'error' &&
+      memberToken.value &&
+      Date.now() - lastFocusRetryAt > 4_000
+    ) {
+      lastFocusRetryAt = Date.now()
+      void retryInitialize()
+    }
+  })
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  return (
+    error instanceof CloudApiError &&
+    ['NETWORK_UNREACHABLE', 'NETWORK_TIMEOUT', 'INVALID_API_RESPONSE'].includes(error.code)
+  )
+}
+
+async function getInitialState(memberTokenValue: string): Promise<DormState> {
+  const retryDelays = [500, 1_300]
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      return await cloudDormApi.getState(memberTokenValue, true, true)
+    } catch (error) {
+      lastError = error
+      if (!isTransientNetworkError(error) || attempt === retryDelays.length) {
+        throw error
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, retryDelays[attempt]))
+    }
+  }
+
+  throw lastError
 }
 
 async function refresh(
@@ -220,7 +257,7 @@ async function initialize(): Promise<void> {
   }
 
   try {
-    const next = await cloudDormApi.getState(memberToken.value, true, true)
+    const next = await getInitialState(memberToken.value)
     applyState(next)
     initialServerVersion.value = next.serverVersion || ''
     phase.value = 'ready'

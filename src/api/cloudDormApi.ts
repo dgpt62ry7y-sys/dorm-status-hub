@@ -38,19 +38,47 @@ export class CloudApiError extends Error {
   }
 }
 
-async function callApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
-  const response = await fetch(DORMSYNC_API_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      action,
-      ...payload,
-    }),
-  })
+const API_TIMEOUT_MS = 12_000
 
-  const result = (await response.json()) as ApiSuccess<T> | ApiFailure
+async function callApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(DORMSYNC_API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action,
+        ...payload,
+      }),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new CloudApiError('NETWORK_TIMEOUT', '连接宿舍服务超时，请稍后重试')
+    }
+    throw new CloudApiError(
+      'NETWORK_UNREACHABLE',
+      '无法连接宿舍服务。请检查网络；如果使用 CloudBase 默认测试域名，请先完成服务域名确认',
+    )
+  } finally {
+    window.clearTimeout(timeout)
+  }
+
+  const responseText = await response.text()
+  let result: ApiSuccess<T> | ApiFailure
+  try {
+    result = JSON.parse(responseText) as ApiSuccess<T> | ApiFailure
+  } catch {
+    throw new CloudApiError(
+      'INVALID_API_RESPONSE',
+      '宿舍服务返回了异常页面，请确认 API 地址正确且测试域名已经确认',
+    )
+  }
+
   if (!result) {
     throw new CloudApiError(
       'EMPTY_RESPONSE',
@@ -59,6 +87,12 @@ async function callApi<T>(action: string, payload: Record<string, unknown> = {})
   }
   if (!result.ok) {
     throw new CloudApiError(result.error.code, result.error.message)
+  }
+  if (!response.ok) {
+    throw new CloudApiError(
+      'INVALID_API_RESPONSE',
+      `宿舍服务返回异常状态 HTTP ${response.status}`,
+    )
   }
   return result.data
 }

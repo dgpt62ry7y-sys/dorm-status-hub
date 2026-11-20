@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   ArrowLeft,
   ArrowRight,
+  ExternalLink,
   KeyRound,
   Link2,
   LoaderCircle,
@@ -12,6 +13,7 @@ import {
   Users,
 } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
+import { DORMSYNC_API_URL } from '../config/cloudbase'
 import type { RoomCapacity } from '../types/dorm'
 
 const {
@@ -126,10 +128,24 @@ async function submit(): Promise<void> {
       <p class="eyebrow">连接失败</p>
       <h1>暂时进不去宿舍</h1>
       <p class="access-intro">{{ actionError || '请检查网络后重试。' }}</p>
-      <button type="button" class="button button--primary" @click="retryInitialize">
-        <RefreshCw :size="17" aria-hidden="true" />
-        重新连接
-      </button>
+      <div class="access-error-actions">
+        <button type="button" class="button button--primary" @click="retryInitialize">
+          <RefreshCw :size="17" aria-hidden="true" />
+          重新连接
+        </button>
+        <a
+          class="button button--secondary"
+          :href="DORMSYNC_API_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <ExternalLink :size="17" aria-hidden="true" />
+          打开服务确认页
+        </a>
+      </div>
+      <p class="access-service-help">
+        如果是首次使用 CloudBase 默认测试域名，请在新页面点击“确定访问”，返回本页后会自动重新连接。
+      </p>
     </section>
   </div>
 

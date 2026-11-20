@@ -335,6 +335,21 @@ textarea:focus-visible {
   line-height: 1.75;
 }
 
+.access-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.access-service-help {
+  max-width: 430px;
+  margin-top: 14px;
+  color: var(--ink-faint);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
 .access-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -1492,9 +1492,6 @@ exports.main = async (event = {}) => {
 
   const responseHeaders = {
     'content-type': 'application/json; charset=utf-8',
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'POST, OPTIONS',
-    'access-control-allow-headers': 'content-type',
   }
 
   if (event.httpMethod === 'OPTIONS') {
