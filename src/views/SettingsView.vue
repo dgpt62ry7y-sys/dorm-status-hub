@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Check, Info, LogOut, ShieldCheck, UserRound } from 'lucide-vue-next'
+import {
+  BookOpenText,
+  Check,
+  ChevronDown,
+  Info,
+  LogOut,
+  ShieldCheck,
+  UserRound,
+} from 'lucide-vue-next'
 import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
 import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
 import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
 import StatusIcon from '../components/StatusIcon.vue'
 import { useDormStore } from '../composables/useDormStore'
+import { LATEST_RELEASE_VERSION, RELEASE_LOG } from '../data/releases'
 import { STATUS_OPTIONS, type DormStatus } from '../types/dorm'
 
 const {
@@ -27,6 +36,7 @@ const toastMessage = ref('')
 const toastVisible = ref(false)
 const saving = ref(false)
 const leaving = ref(false)
+const releaseLogOpen = ref(false)
 let toastTimer: number | undefined
 
 function showToast(message: string): void {
@@ -191,6 +201,55 @@ onBeforeUnmount(() => {
                 有新版本，请刷新页面
               </button>
             </div>
+          </div>
+          <div class="settings-release-log">
+            <button
+              type="button"
+              class="settings-release-log__toggle"
+              aria-controls="settings-release-log-content"
+              :aria-expanded="releaseLogOpen"
+              @click="releaseLogOpen = !releaseLogOpen"
+            >
+              <span class="settings-release-log__label">
+                <BookOpenText :size="17" stroke-width="1.8" aria-hidden="true" />
+                <span>
+                  <strong>功能更新日志</strong>
+                  <small>回顾每个版本新增和调整的内容</small>
+                </span>
+              </span>
+              <span class="settings-release-log__meta">
+                <small>{{ RELEASE_LOG.length }} 个版本</small>
+                <ChevronDown
+                  :class="{ 'settings-release-log__chevron--open': releaseLogOpen }"
+                  :size="16"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                />
+              </span>
+            </button>
+
+            <Transition name="release-log">
+              <div
+                v-if="releaseLogOpen"
+                id="settings-release-log-content"
+                class="settings-release-log__content"
+              >
+                <p v-if="RELEASE_LOG.length === 0" class="settings-release-log__empty">
+                  暂无更新记录
+                </p>
+                <ol v-else>
+                  <li v-for="release in RELEASE_LOG" :key="release.version">
+                    <header>
+                      <strong>V{{ release.version }}</strong>
+                      <span v-if="release.version === LATEST_RELEASE_VERSION">最新</span>
+                    </header>
+                    <ul>
+                      <li v-for="item in release.items" :key="item">{{ item }}</li>
+                    </ul>
+                  </li>
+                </ol>
+              </div>
+            </Transition>
           </div>
         </section>
 
