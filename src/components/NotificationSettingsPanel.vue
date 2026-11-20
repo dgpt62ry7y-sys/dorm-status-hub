@@ -28,6 +28,7 @@ const {
   sendTestNotification,
   markNotificationTopicSeen,
 } = useDormStore()
+const demoMode = __DEMO_MODE__
 
 const settings = ref<NotificationSettings | null>(null)
 const loading = ref(false)
@@ -91,6 +92,10 @@ async function copyTopic(): Promise<void> {
 
 function openAndroidSubscription(): void {
   markNotificationTopicSeen()
+  if (demoMode) {
+    emit('notify', '体验版已模拟订阅操作，不会打开真实 ntfy 频道')
+    return
+  }
   window.location.href = settings.value?.androidDeepLink || ''
 }
 
@@ -154,8 +159,14 @@ onBeforeUnmount(() => {
     </div>
 
     <p class="notification-panel__intro">
-      ntfy 支持 Android、iPhone、iPad 和桌面设备。订阅宿舍共享 Topic 后即可接收通知；
-      你也可以同时在下方登记 Bark，作为 iPhone 的另一条通知通道。
+      <template v-if="demoMode">
+        这里展示 ntfy 与 Bark 的双通道设置和消息预览。体验版不会使用真实 Topic、
+        调用推送服务或向手机发送通知。
+      </template>
+      <template v-else>
+        ntfy 支持 Android、iPhone、iPad 和桌面设备。订阅宿舍共享 Topic 后即可接收通知；
+        你也可以同时在下方登记 Bark，作为 iPhone 的另一条通知通道。
+      </template>
     </p>
 
     <div v-if="needsAttention" class="notification-alert">

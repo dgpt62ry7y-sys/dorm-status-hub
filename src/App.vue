@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, defineAsyncComponent, onMounted } from 'vue'
 import { Home, Settings, Users } from '@lucide/vue'
 import AccessGate from './components/AccessGate.vue'
 import CapacityNoticeDialog from './components/CapacityNoticeDialog.vue'
@@ -35,6 +35,16 @@ const cloudLabel = computed(() => {
 const roomTypeLabel = computed(() =>
   state.room.capacity === 6 ? '六人共享空间' : '四人共享空间',
 )
+const demoMode = __DEMO_MODE__
+const DemoBanner = demoMode
+  ? defineAsyncComponent(() => import('./components/DemoBanner.vue'))
+  : null
+const DemoConsole = demoMode
+  ? defineAsyncComponent(() => import('./components/DemoConsole.vue'))
+  : null
+const DemoNotificationToast = demoMode
+  ? defineAsyncComponent(() => import('./components/DemoNotificationToast.vue'))
+  : null
 
 onMounted(() => {
   void initialize()
@@ -79,6 +89,7 @@ onMounted(() => {
         </div>
       </div>
     </header>
+    <DemoBanner v-if="demoMode" />
 
     <main class="app-main" :class="{ 'app-main--gate': phase !== 'ready' }">
       <AccessGate v-if="phase !== 'ready'" />
@@ -115,5 +126,7 @@ onMounted(() => {
     <CapacityNoticeDialog />
     <RoomVerificationDialog />
     <LocalTestPanel />
+    <DemoConsole v-if="demoMode" />
+    <DemoNotificationToast v-if="demoMode" />
   </div>
 </template>

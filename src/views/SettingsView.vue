@@ -30,6 +30,7 @@ const {
 } = useDormStore()
 const router = useRouter()
 const appVersion = __APP_VERSION__
+const demoMode = __DEMO_MODE__
 
 const nickname = ref(currentMember.value?.nickname ?? '')
 const defaultStatus = ref<DormStatus>(state.preferences.defaultStatus)
@@ -59,7 +60,7 @@ async function handleSaveProfile(): Promise<void> {
   try {
     await saveProfile(nickname.value, defaultStatus.value)
     nickname.value = currentMember.value?.nickname ?? nickname.value
-    showToast('个人设置已同步到云端')
+    showToast(demoMode ? '体验账号设置已更新' : '个人设置已同步到云端')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败，请重试')
   } finally {
@@ -95,7 +96,13 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">宿舍状态共享站 / {{ state.room.name }}</p>
         <h1>设置</h1>
-        <p class="page-intro">管理称呼、默认状态、账号恢复和登录设备。</p>
+        <p class="page-intro">
+          {{
+            demoMode
+              ? '体验称呼、状态、通知与设备设置。'
+              : '管理称呼、默认状态、账号恢复和登录设备。'
+          }}
+        </p>
       </div>
       <span class="profile-chip">
         <UserRound :size="17" stroke-width="1.8" aria-hidden="true" />
@@ -160,7 +167,7 @@ onBeforeUnmount(() => {
 
         <BarkNotificationPanel @notify="showToast" />
 
-        <AccountDevicePanel @notify="showToast" />
+        <AccountDevicePanel :demo-mode="demoMode" @notify="showToast" />
       </div>
 
       <aside class="settings-aside">
@@ -171,8 +178,11 @@ onBeforeUnmount(() => {
             <Info :size="19" stroke-width="1.8" aria-hidden="true" />
           </div>
           <div>
-            <h2 id="demo-heading">云端同步已开启</h2>
-            <p>
+            <h2 id="demo-heading">{{ demoMode ? '仅保存在当前页面' : '云端同步已开启' }}</h2>
+            <p v-if="demoMode">
+              体验版使用浏览器内存虚拟数据，不连接正式服务；刷新页面后会自动恢复初始内容。
+            </p>
+            <p v-else>
               成员与状态通过 CloudBase 云函数保存，其他室友的设备会自动获取最新变化。
             </p>
           </div>
@@ -191,7 +201,7 @@ onBeforeUnmount(() => {
             <span>我的身份</span>
             <strong>{{ currentMember?.role === 'owner' ? '创建者' : '成员' }}</strong>
           </div>
-          <div class="settings-version-row">
+          <div v-if="!demoMode" class="settings-version-row">
             <span>版本</span>
             <div>
               <strong>{{ appVersion }}</strong>
@@ -205,7 +215,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div class="settings-release-log">
+          <div v-if="!demoMode" class="settings-release-log">
             <button
               type="button"
               class="settings-release-log__toggle"
@@ -262,6 +272,7 @@ onBeforeUnmount(() => {
         </section>
 
         <button
+          v-if="!demoMode"
           type="button"
           class="text-button text-button--danger"
           :disabled="leaving"

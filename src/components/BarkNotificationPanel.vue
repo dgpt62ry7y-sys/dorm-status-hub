@@ -24,6 +24,7 @@ const {
   testBarkNotification,
   removeBarkDevice,
 } = useDormStore()
+const demoMode = __DEMO_MODE__
 
 const devices = ref<BarkDevice[]>([])
 const loading = ref(false)
@@ -152,7 +153,10 @@ onMounted(() => {
       <Smartphone :size="19" stroke-width="1.8" aria-hidden="true" />
       <div>
         <strong>在 iPhone 或 iPad 安装 Bark</strong>
-        <p>
+        <p v-if="demoMode">
+          体验版使用预置 Bark 设备演示连接、测试和删除流程，不会接收或保存真实 Device Key。
+        </p>
+        <p v-else>
           打开 Bark，复制 App 首页的 Device Key 或测试链接，再粘贴到下方。点击连接后，
           DormSync 会先发送测试通知，成功后才会保存。
         </p>
@@ -162,7 +166,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <form class="bark-form" @submit.prevent="connectDevice">
+    <form v-if="!demoMode" class="bark-form" @submit.prevent="connectDevice">
       <label class="field">
         <span class="field__label">
           <KeyRound :size="15" stroke-width="1.8" aria-hidden="true" />

@@ -15,7 +15,7 @@ document.addEventListener('touchmove', preventMultiTouchZoom, { passive: false }
 
 createApp(App).use(router).mount('#app')
 
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+if (import.meta.env.PROD && !__DEMO_MODE__ && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       // Offline support is optional; a registration failure should not block the app.

@@ -15,7 +15,7 @@ import {
   type StatusUpdate,
 } from '../types/dorm'
 import { formatHeaderDate, getEffectiveStatus } from '../utils/time'
-import { shareDormInvite } from '../utils/share'
+import { shareDemoExperience, shareDormInvite } from '../utils/share'
 
 const {
   state,
@@ -25,6 +25,7 @@ const {
   saveStatus,
   notificationTopicUpdateAvailable,
 } = useDormStore()
+const demoMode = __DEMO_MODE__
 
 const now = ref(new Date())
 const sheetOpen = ref(false)
@@ -141,7 +142,9 @@ async function submitStatus(update: StatusUpdate): Promise<void> {
 
 async function handleShare(): Promise<void> {
   try {
-    const result = await shareDormInvite(state.room.name, state.room.inviteCode)
+    const result = __DEMO_MODE__
+      ? await shareDemoExperience()
+      : await shareDormInvite(state.room.name, state.room.inviteCode)
     showToast(result.message)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
@@ -291,7 +294,7 @@ onBeforeUnmount(() => {
           @choose="chooseStatus"
         />
 
-        <RouterLink to="/members" class="invite-nudge">
+        <RouterLink v-if="!demoMode" to="/members" class="invite-nudge">
           <span>
             <small>邀请码</small>
             <strong>{{ state.room.inviteCode }}</strong>

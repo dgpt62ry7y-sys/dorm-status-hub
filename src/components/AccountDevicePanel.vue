@@ -13,6 +13,15 @@ import {
 import { useDormStore } from '../composables/useDormStore'
 import SecretCodeDialog from './SecretCodeDialog.vue'
 
+const props = withDefaults(
+  defineProps<{
+    demoMode?: boolean
+  }>(),
+  {
+    demoMode: false,
+  },
+)
+
 const emit = defineEmits<{
   notify: [message: string]
 }>()
@@ -169,6 +178,7 @@ onMounted(() => {
       </button>
 
       <button
+        v-if="!props.demoMode"
         type="button"
         class="account-action"
         :disabled="rotatingRecovery"
@@ -231,6 +241,7 @@ onMounted(() => {
     </div>
 
     <button
+      v-if="!props.demoMode"
       type="button"
       class="text-button text-button--danger account-leave-device"
       :disabled="leavingDevice"

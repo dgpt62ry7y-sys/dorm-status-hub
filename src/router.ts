@@ -29,7 +29,9 @@ const router = createRouter({
 })
 
 router.afterEach((to) => {
-  document.title = '宿舍状态共享站'
+  document.title = __DEMO_MODE__
+    ? `宿舍状态共享站 · 体验版 · ${String(to.meta.title || '宿舍状态')}`
+    : '宿舍状态共享站'
   void to
 })
 

@@ -302,6 +302,17 @@ async function retryInitialize(): Promise<void> {
   await initialize()
 }
 
+async function activateSessionToken(token: string): Promise<void> {
+  stopPolling()
+  memberToken.value = token
+  localStorage.setItem(TOKEN_KEY, token)
+  devices.value = []
+  actionError.value = ''
+  initialized = false
+  phase.value = 'loading'
+  await initialize()
+}
+
 async function createRoom(
   roomName: string,
   nickname: string,
@@ -592,6 +603,7 @@ export function useDormStore() {
     isOwner,
     initialize,
     retryInitialize,
+    activateSessionToken,
     refresh,
     createRoom,
     joinRoom,

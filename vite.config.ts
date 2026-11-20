@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [vue()],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __DEMO_MODE__: 'false',
   },
   server: {
     proxy: {

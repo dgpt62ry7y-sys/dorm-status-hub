@@ -4,7 +4,11 @@ import { Crown, KeyRound, RefreshCw, Share2, UserMinus, UserRound } from '@lucid
 import AppToast from '../components/AppToast.vue'
 import { useDormStore } from '../composables/useDormStore'
 import { formatDateLabel } from '../utils/time'
-import { shareDormInvite } from '../utils/share'
+import {
+  getDemoExperienceUrl,
+  shareDemoExperience,
+  shareDormInvite,
+} from '../utils/share'
 
 const {
   state,
@@ -15,11 +19,13 @@ const {
 } = useDormStore()
 const toastMessage = ref('')
 const toastVisible = ref(false)
+const demoMode = __DEMO_MODE__
 const regenerating = ref(false)
 const removingId = ref('')
 let toastTimer: number | undefined
 
 const inviteUrl = computed(() => {
+  if (demoMode) return getDemoExperienceUrl()
   const url = new URL(window.location.origin)
   url.searchParams.set('invite', state.room.inviteCode)
   return url.toString()
@@ -36,7 +42,9 @@ function showToast(message: string): void {
 
 async function handleShare(): Promise<void> {
   try {
-    const result = await shareDormInvite(state.room.name, state.room.inviteCode)
+    const result = demoMode
+      ? await shareDemoExperience()
+      : await shareDormInvite(state.room.name, state.room.inviteCode)
     showToast(result.message)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
@@ -89,7 +97,7 @@ onBeforeUnmount(() => {
       </div>
       <button type="button" class="button button--primary" @click="handleShare">
         <Share2 :size="17" stroke-width="1.8" aria-hidden="true" />
-        分享邀请
+        {{ demoMode ? '分享体验版' : '分享邀请' }}
       </button>
     </section>
 
@@ -98,14 +106,17 @@ onBeforeUnmount(() => {
         <KeyRound :size="24" stroke-width="1.7" />
       </div>
       <div class="invite-band__copy">
-        <h2 id="invite-heading">邀请室友加入</h2>
-        <p>把链接或邀请码发到宿舍群，对方点击后即可加入。</p>
+        <h2 id="invite-heading">{{ demoMode ? '分享体验版' : '邀请室友加入' }}</h2>
+        <p v-if="demoMode">
+          体验版使用浏览器内存虚拟数据。把链接分享给朋友，每个人都会得到独立演示。
+        </p>
+        <p v-else>把链接或邀请码发到宿舍群，对方点击后即可加入。</p>
       </div>
       <div class="invite-band__code">
-        <span>邀请码</span>
-        <strong>{{ state.room.inviteCode }}</strong>
+        <span>{{ demoMode ? '体验模式' : '邀请码' }}</span>
+        <strong>{{ demoMode ? '虚拟' : state.room.inviteCode }}</strong>
         <button
-          v-if="isOwner"
+          v-if="isOwner && !demoMode"
           type="button"
           class="invite-regenerate"
           :disabled="regenerating"
@@ -117,7 +128,7 @@ onBeforeUnmount(() => {
       </div>
       <button type="button" class="button button--light" @click="handleShare">
         <Share2 :size="17" stroke-width="1.8" aria-hidden="true" />
-        发到群里
+        {{ demoMode ? '复制体验链接' : '发到群里' }}
       </button>
       <p class="invite-band__url">{{ inviteUrl }}</p>
     </section>
