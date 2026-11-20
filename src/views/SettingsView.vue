@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Check, Info, LogOut, ShieldCheck, UserRound } from 'lucide-vue-next'
 import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
+import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
 import StatusIcon from '../components/StatusIcon.vue'
 import { useDormStore } from '../composables/useDormStore'
 import { STATUS_OPTIONS, type DormStatus } from '../types/dorm'
@@ -144,6 +145,8 @@ onBeforeUnmount(() => {
       </div>
 
       <aside class="settings-aside">
+        <RoomCapacityPanel @notify="showToast" />
+
         <section class="info-panel" aria-labelledby="demo-heading">
           <div class="info-panel__icon">
             <Info :size="19" stroke-width="1.8" aria-hidden="true" />
@@ -171,7 +174,7 @@ onBeforeUnmount(() => {
           </div>
           <div>
             <span>版本</span>
-            <strong>1.1.0 跨设备账号版</strong>
+            <strong>1.2.0 四人六人房型版</strong>
           </div>
         </section>
 

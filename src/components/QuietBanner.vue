@@ -17,7 +17,7 @@ const quietRecords = computed(() =>
 )
 
 const hasQuiet = computed(() => quietRecords.value.length > 0)
-const quietLevel = computed(() => Math.min(4, quietRecords.value.length))
+const quietLevel = computed(() => Math.min(6, quietRecords.value.length))
 const hasUnknownEnd = computed(() => quietRecords.value.some((record) => !record.endAt))
 const latestEnd = computed(() => {
   const timestamps = quietRecords.value

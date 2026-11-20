@@ -5,6 +5,7 @@ import type {
   DormState,
   DormStatus,
   RevokeDeviceResult,
+  RoomCapacity,
   StatusUpdate,
 } from '../types/dorm'
 
@@ -63,7 +64,12 @@ async function callApi<T>(action: string, payload: Record<string, unknown> = {})
 }
 
 export const cloudDormApi = {
-  createRoom(input: { roomName: string; nickname: string; deviceLabel: string }) {
+  createRoom(input: {
+    roomName: string
+    nickname: string
+    deviceLabel: string
+    capacity: RoomCapacity
+  }) {
     return callApi<SessionResult>('createRoom', input)
   },
 
@@ -79,8 +85,8 @@ export const cloudDormApi = {
     return callApi<SessionResult>('recoverAccount', input)
   },
 
-  getState(memberToken: string) {
-    return callApi<DormState>('getState', { memberToken })
+  getState(memberToken: string, claimCapacityNotice = false) {
+    return callApi<DormState>('getState', { memberToken, claimCapacityNotice })
   },
 
   updateStatus(memberToken: string, update: StatusUpdate) {
@@ -131,5 +137,16 @@ export const cloudDormApi = {
 
   rotateRecoveryCode(memberToken: string) {
     return callApi<{ recoveryCode: string }>('rotateRecoveryCode', { memberToken })
+  },
+
+  updateRoomCapacity(memberToken: string, capacity: RoomCapacity) {
+    return callApi<DormState>('updateRoomCapacity', { memberToken, capacity })
+  },
+
+  acknowledgeCapacityNotice(memberToken: string, noticeId: string) {
+    return callApi<{ acknowledged: true }>('acknowledgeCapacityNotice', {
+      memberToken,
+      noticeId,
+    })
   },
 }

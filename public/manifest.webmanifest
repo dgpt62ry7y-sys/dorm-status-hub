@@ -1,7 +1,7 @@
 {
   "name": "宿舍状态共享站",
   "short_name": "宿舍状态",
-  "description": "四人宿舍状态共享站",
+  "description": "四人或六人宿舍状态共享站",
   "lang": "zh-CN",
   "start_url": "/",
   "display": "standalone",

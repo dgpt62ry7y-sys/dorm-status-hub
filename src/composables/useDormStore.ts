@@ -1,10 +1,12 @@
 import { computed, reactive, ref } from 'vue'
 import { CloudApiError, cloudDormApi } from '../api/cloudDormApi'
 import type {
+  CapacityNotice,
   DeviceLinkResult,
   DeviceSession,
   DormState,
   DormStatus,
+  RoomCapacity,
   StatusUpdate,
 } from '../types/dorm'
 import { getDeviceLabel } from '../utils/device'
@@ -51,6 +53,7 @@ const lastSyncedAt = ref<string | null>(null)
 const devices = ref<DeviceSession[]>([])
 const devicesLoading = ref(false)
 const secretDialog = ref<SecretDialogState | null>(null)
+const capacityNoticeDialog = ref<CapacityNotice | null>(null)
 
 let pollTimer: number | undefined
 let refreshInFlight: Promise<void> | null = null
@@ -66,6 +69,7 @@ function applyState(next: DormState): void {
   state.statuses = next.statuses
   state.preferences = next.preferences
   lastSyncedAt.value = new Date().toISOString()
+  if (next.capacityNotice) capacityNoticeDialog.value = next.capacityNotice
 }
 
 function saveSession(token: string, next: DormState): void {
@@ -85,6 +89,7 @@ function clearSession(): void {
   lastSyncedAt.value = null
   devices.value = []
   secretDialog.value = null
+  capacityNoticeDialog.value = null
   stopPolling()
 }
 
@@ -132,27 +137,27 @@ function bindLifecycle(): void {
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && memberToken.value) {
-      void refresh(true)
+      void refresh(true, true)
     }
   })
 
   window.addEventListener('online', () => {
     isOnline.value = true
-    if (memberToken.value) void refresh(true)
+    if (memberToken.value) void refresh(true, true)
   })
   window.addEventListener('offline', () => {
     isOnline.value = false
   })
 }
 
-async function refresh(silent = true): Promise<void> {
+async function refresh(silent = true, claimCapacityNotice = false): Promise<void> {
   if (!memberToken.value || phase.value !== 'ready') return
   if (refreshInFlight) return refreshInFlight
 
   isSyncing.value = true
   refreshInFlight = (async () => {
     try {
-      const next = await cloudDormApi.getState(memberToken.value)
+      const next = await cloudDormApi.getState(memberToken.value, claimCapacityNotice)
       applyState(next)
       isOnline.value = true
       if (!silent) actionError.value = ''
@@ -187,7 +192,7 @@ async function initialize(): Promise<void> {
   }
 
   try {
-    const next = await cloudDormApi.getState(memberToken.value)
+    const next = await cloudDormApi.getState(memberToken.value, true)
     applyState(next)
     phase.value = 'ready'
     isOnline.value = true
@@ -211,11 +216,16 @@ async function retryInitialize(): Promise<void> {
   await initialize()
 }
 
-async function createRoom(roomName: string, nickname: string): Promise<void> {
+async function createRoom(
+  roomName: string,
+  nickname: string,
+  capacity: RoomCapacity,
+): Promise<void> {
   const result = await cloudDormApi.createRoom({
     roomName,
     nickname,
     deviceLabel: getDeviceLabel(),
+    capacity,
   })
   saveSession(result.memberToken, result.state)
   if (result.recoveryCode) showRecoveryCode(result.recoveryCode, true)
@@ -335,6 +345,16 @@ async function rotateRecoveryCode(): Promise<void> {
   showRecoveryCode(result.recoveryCode)
 }
 
+async function updateRoomCapacity(capacity: RoomCapacity): Promise<void> {
+  const next = await cloudDormApi.updateRoomCapacity(memberToken.value, capacity)
+  applyState(next)
+}
+
+async function acknowledgeCapacityNotice(noticeId: string): Promise<void> {
+  await cloudDormApi.acknowledgeCapacityNotice(memberToken.value, noticeId)
+  capacityNoticeDialog.value = null
+}
+
 async function regenerateInvite(): Promise<string> {
   const result = await cloudDormApi.regenerateInvite(memberToken.value)
   applyState(result.state)
@@ -371,6 +391,7 @@ export function useDormStore() {
     devices,
     devicesLoading,
     secretDialog,
+    capacityNoticeDialog,
     currentMember,
     memberCount,
     availableSeats,
@@ -394,6 +415,8 @@ export function useDormStore() {
     revokeDevice,
     unlinkCurrentDevice,
     rotateRecoveryCode,
+    updateRoomCapacity,
+    acknowledgeCapacityNotice,
     dismissSecretDialog,
     confirmSecretDialog,
     clearSession,

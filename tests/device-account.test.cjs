@@ -254,6 +254,191 @@ async function run() {
     throw new Error('Exiting a device removed the member from the room')
   }
 
+  expectError(
+    await invoke({
+      action: 'createRoom',
+      roomName: `非法容量${suffix}`,
+      nickname: `非法容量${suffix}`,
+      capacity: 5,
+    }),
+    'INVALID_CAPACITY',
+  )
+
+  const sixPerson = ok(
+    await invoke({
+      action: 'createRoom',
+      roomName: `六人寝${suffix}`,
+      nickname: `六人房主${suffix}`,
+      deviceLabel: 'Windows · Chrome',
+      capacity: 6,
+    }),
+    'create six-person room',
+  )
+  if (sixPerson.state.room.capacity !== 6) throw new Error('Six-person capacity missing')
+  const sixOwnerToken = sixPerson.memberToken
+  const sixInvite = sixPerson.state.room.inviteCode
+  const extraMembers = []
+
+  for (let index = 0; index < 5; index += 1) {
+    const joinedSix = ok(
+      await invoke({
+        action: 'joinRoom',
+        inviteCode: sixInvite,
+        nickname: `六人成员${suffix}-${index}`,
+        deviceLabel: `测试设备 ${index}`,
+      }),
+      `join six-person member ${index}`,
+    )
+    extraMembers.push(joinedSix)
+  }
+
+  expectError(
+    await invoke({
+      action: 'joinRoom',
+      inviteCode: sixInvite,
+      nickname: `第七人${suffix}`,
+      deviceLabel: '超额设备',
+    }),
+    'ROOM_FULL',
+  )
+  expectError(
+    await invoke({
+      action: 'updateRoomCapacity',
+      memberToken: extraMembers[0].memberToken,
+      capacity: 4,
+    }),
+    'ONLY_OWNER',
+  )
+  expectError(
+    await invoke({
+      action: 'updateRoomCapacity',
+      memberToken: sixOwnerToken,
+      capacity: 4,
+    }),
+    'CAPACITY_LIMIT',
+  )
+
+  ok(
+    await invoke({
+      action: 'removeMember',
+      memberToken: sixOwnerToken,
+      memberId: extraMembers[0].state.currentMemberId,
+    }),
+    'remove first six-person member',
+  )
+  ok(
+    await invoke({
+      action: 'removeMember',
+      memberToken: sixOwnerToken,
+      memberId: extraMembers[1].state.currentMemberId,
+    }),
+    'remove second six-person member',
+  )
+
+  const downgraded = ok(
+    await invoke({
+      action: 'updateRoomCapacity',
+      memberToken: sixOwnerToken,
+      capacity: 4,
+    }),
+    'downgrade to four-person room',
+  )
+  if (downgraded.room.capacity !== 4) throw new Error('Downgrade did not apply')
+  if (downgraded.room.inviteCode !== sixInvite) throw new Error('Invite changed on downgrade')
+
+  const witness = extraMembers[2]
+  const polledState = ok(
+    await invoke({ action: 'getState', memberToken: witness.memberToken }),
+    'poll without claiming capacity notice',
+  )
+  if (polledState.capacityNotice) {
+    throw new Error('Background polling consumed the capacity notice')
+  }
+
+  const witnessLink = ok(
+    await invoke({
+      action: 'createDeviceLink',
+      memberToken: witness.memberToken,
+    }),
+    'create witness device link',
+  )
+  const witnessSecond = ok(
+    await invoke({
+      action: 'claimDeviceLink',
+      code: witnessLink.code,
+      deviceLabel: 'Witness second device',
+    }),
+    'claim witness second device',
+  )
+
+  const deliveredNotice = witnessSecond.state.capacityNotice
+  if (!deliveredNotice) {
+    throw new Error('First device access did not receive the capacity notice')
+  }
+  if (deliveredNotice.from !== 6 || deliveredNotice.to !== 4) {
+    throw new Error('Capacity notice has incorrect transition')
+  }
+
+  const [witnessA, witnessB] = await Promise.all([
+    invoke({ action: 'getState', memberToken: witness.memberToken }),
+    invoke({ action: 'getState', memberToken: witnessSecond.memberToken }),
+  ])
+  if (witnessA.ok && witnessA.data.capacityNotice) {
+    throw new Error('Capacity notice repeated on the original device')
+  }
+  if (witnessB.ok && witnessB.data.capacityNotice) {
+    throw new Error('Capacity notice repeated on the newly bound device')
+  }
+
+  const ownerAfterChange = ok(
+    await invoke({ action: 'getState', memberToken: sixOwnerToken }),
+    'owner state after capacity change',
+  )
+  if (ownerAfterChange.capacityNotice) {
+    throw new Error('Owner received their own capacity notice')
+  }
+
+  ok(
+    await invoke({
+      action: 'acknowledgeCapacityNotice',
+      memberToken: witnessSecond.memberToken,
+      noticeId: deliveredNotice.id,
+    }),
+    'acknowledge capacity notice',
+  )
+
+  ok(
+    await invoke({
+      action: 'updateRoomCapacity',
+      memberToken: sixOwnerToken,
+      capacity: 6,
+    }),
+    'upgrade to six-person room again',
+  )
+  const latestChange = ok(
+    await invoke({
+      action: 'updateRoomCapacity',
+      memberToken: sixOwnerToken,
+      capacity: 4,
+    }),
+    'downgrade again',
+  )
+  if (latestChange.room.inviteCode !== sixInvite) {
+    throw new Error('Invite changed on repeated capacity update')
+  }
+
+  const latestNoticeState = ok(
+    await invoke({
+      action: 'getState',
+      memberToken: witness.memberToken,
+      claimCapacityNotice: true,
+    }),
+    'latest capacity notice on witness',
+  )
+  if (!latestNoticeState.capacityNotice || latestNoticeState.capacityNotice.to !== 4) {
+    throw new Error('Latest capacity notice was not delivered')
+  }
+
   const legacyRoomId = 'legacy-room'
   const legacyMemberId = 'legacy-member'
   const legacyToken = 'legacy-token-value'
@@ -310,6 +495,15 @@ async function run() {
         deviceLimit: true,
         memberRemovalRevokesSessions: true,
         exitDeviceKeepsMembership: true,
+        sixPersonCapacity: true,
+        roomFullAtSix: true,
+        capacityDowngradeGuard: true,
+        capacityOwnerPermission: true,
+        capacityNoticeOncePerAccount: true,
+        pollingDoesNotConsumeCapacityNotice: true,
+        ownerSkipsCapacityNotice: true,
+        inviteStableAcrossCapacityChange: true,
+        latestCapacityNoticeOnly: true,
         legacyTokenMigration: true,
       },
       null,

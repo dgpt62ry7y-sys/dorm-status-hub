@@ -1,4 +1,13 @@
 export type DormStatus = 'sleep' | 'normal' | 'focus' | 'away'
+export type RoomCapacity = 4 | 6
+
+export interface CapacityNotice {
+  id: string
+  from: RoomCapacity
+  to: RoomCapacity
+  changedAt: string
+  changedBy: string
+}
 
 export interface Member {
   id: string
@@ -21,13 +30,14 @@ export interface DormState {
     name: string
     inviteCode: string
     ownerId: string
-    capacity: number
+    capacity: RoomCapacity
     memberCount?: number
   }
   members: Member[]
   statuses: StatusRecord[]
   currentMemberId: string
   currentDeviceId: string
+  capacityNotice?: CapacityNotice | null
   preferences: {
     defaultStatus: DormStatus
   }

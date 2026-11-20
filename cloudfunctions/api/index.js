@@ -4,7 +4,9 @@ const cloudbase = require('@cloudbase/node-sdk')
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV })
 const db = app.database()
 
-const ROOM_CAPACITY = 4
+const DEFAULT_ROOM_CAPACITY = 4
+const MAX_ROOM_CAPACITY = 6
+const VALID_ROOM_CAPACITIES = new Set([4, 6])
 const MAX_DEVICES = 5
 const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
@@ -105,7 +107,7 @@ async function getActiveMembers(roomId) {
   const result = await db
     .collection('members')
     .where({ roomId, active: true })
-    .limit(ROOM_CAPACITY)
+    .limit(MAX_ROOM_CAPACITY)
     .get()
   return result.data
 }
@@ -114,7 +116,7 @@ async function getStatuses(roomId) {
   const result = await db
     .collection('statuses')
     .where({ roomId })
-    .limit(ROOM_CAPACITY)
+    .limit(MAX_ROOM_CAPACITY)
     .get()
   return result.data
 }
@@ -271,10 +273,32 @@ async function expireStatuses(statuses) {
   return normalized
 }
 
-async function buildState(member, currentDeviceId = '') {
+async function takeCapacityNotice(member, room) {
+  const notice = room.capacityNotice
+  if (!notice?.id || notice.changedBy === member._id) return null
+
+  const deliveredAt = nowIso()
+  const result = await db
+    .collection('members')
+    .where({
+      _id: member._id,
+      capacityNoticePendingId: notice.id,
+    })
+    .update({
+      capacityNoticePendingId: null,
+      capacityNoticeDeliveredId: notice.id,
+      capacityNoticeDeliveredAt: deliveredAt,
+    })
+  return (result.updated || 0) === 1 ? notice : null
+}
+
+async function buildState(member, currentDeviceId = '', claimCapacityNotice = false) {
   const room = await getRoom(member.roomId)
   if (!room || room.closed) return null
 
+  const capacityNotice = claimCapacityNotice
+    ? await takeCapacityNotice(member, room)
+    : null
   const [members, rawStatuses] = await Promise.all([
     getActiveMembers(member.roomId),
     getStatuses(member.roomId),
@@ -301,11 +325,14 @@ async function buildState(member, currentDeviceId = '') {
       name: room.name,
       inviteCode: room.inviteCode,
       ownerId: room.ownerId,
-      capacity: room.capacity || ROOM_CAPACITY,
+      capacity: VALID_ROOM_CAPACITIES.has(room.capacity)
+        ? room.capacity
+        : DEFAULT_ROOM_CAPACITY,
       memberCount: members.length,
     },
     currentMemberId: member._id,
     currentDeviceId,
+    capacityNotice,
     members: members.map((item) => ({
       id: item._id,
       nickname: item.nickname,
@@ -385,8 +412,12 @@ async function insertMember(transaction, { roomId, nickname, role, label }) {
 async function handleCreateRoom(event) {
   const nickname = cleanText(event.nickname, 12)
   const roomName = cleanText(event.roomName || '我的宿舍', 20)
+  const capacity = Number(event.capacity || DEFAULT_ROOM_CAPACITY)
   if (!nickname) return fail('NICKNAME_REQUIRED', '请输入昵称')
   if (!roomName) return fail('ROOM_NAME_REQUIRED', '请输入宿舍名称')
+  if (!VALID_ROOM_CAPACITIES.has(capacity)) {
+    return fail('INVALID_CAPACITY', '宿舍容量只能是四人寝或六人寝')
+  }
 
   const created = await db.runTransaction(async (transaction) => {
     const rooms = transaction.collection('rooms')
@@ -397,7 +428,7 @@ async function handleCreateRoom(event) {
       inviteCode,
       inviteCodeHash: hashToken(inviteCode),
       ownerId: '',
-      capacity: ROOM_CAPACITY,
+      capacity,
       createdAt,
       updatedAt: createdAt,
       closed: false,
@@ -443,9 +474,12 @@ async function handleJoinRoom(event) {
       const membersResult = await transaction
         .collection('members')
         .where({ roomId: room._id, active: true })
-        .limit(ROOM_CAPACITY)
+        .limit(MAX_ROOM_CAPACITY)
         .get()
-      if (membersResult.data.length >= (room.capacity || ROOM_CAPACITY)) {
+      const roomCapacity = VALID_ROOM_CAPACITIES.has(room.capacity)
+        ? room.capacity
+        : DEFAULT_ROOM_CAPACITY
+      if (membersResult.data.length >= roomCapacity) {
         throw new Error('ROOM_FULL')
       }
       if (membersResult.data.some((item) => item.nickname === nickname)) {
@@ -577,7 +611,7 @@ async function handleClaimDeviceLink(event) {
     usedBySessionId: sessionId,
   })
 
-  const state = await buildState(member, sessionId)
+  const state = await buildState(member, sessionId, true)
   if (!state) return fail('DEVICE_LINK_INVALID', '绑定码已失效')
   return ok({ memberToken, state })
 }
@@ -615,7 +649,7 @@ async function handleRecoverAccount(event) {
     memberToken,
     label: deviceLabel(event.deviceLabel),
   })
-  const state = await buildState(member, sessionId)
+  const state = await buildState(member, sessionId, true)
   if (!state) return fail('RECOVERY_CODE_INVALID', '恢复码已失效')
   return ok({ memberToken, state })
 }
@@ -760,6 +794,74 @@ async function handleRegenerateInvite(member, currentDeviceId) {
   })
 }
 
+async function handleUpdateRoomCapacity(event, member, currentDeviceId) {
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId !== member._id) {
+    return fail('ONLY_OWNER', '只有房主可以修改宿舍房型')
+  }
+
+  const capacity = Number(event.capacity)
+  if (!VALID_ROOM_CAPACITIES.has(capacity)) {
+    return fail('INVALID_CAPACITY', '宿舍容量只能是四人寝或六人寝')
+  }
+
+  const currentCapacity = VALID_ROOM_CAPACITIES.has(room.capacity)
+    ? room.capacity
+    : DEFAULT_ROOM_CAPACITY
+  if (capacity === currentCapacity) {
+    return ok(await buildState(member, currentDeviceId))
+  }
+
+  const members = await getActiveMembers(member.roomId)
+  if (capacity === 4 && members.length > 4) {
+    return fail('CAPACITY_LIMIT', '请先将当前成员移除到 4 人或更少')
+  }
+
+  const changedAt = nowIso()
+  const notice = {
+    id: crypto.randomUUID(),
+    from: currentCapacity,
+    to: capacity,
+    changedAt,
+    changedBy: member._id,
+  }
+  await db.collection('rooms').doc(member.roomId).update({
+    capacity,
+    capacityNotice: notice,
+    updatedAt: changedAt,
+  })
+
+  await Promise.all(
+    members
+      .filter((item) => item._id !== member._id)
+      .map((item) =>
+        db.collection('members').doc(item._id).update({
+          capacityNoticePendingId: notice.id,
+        }),
+      ),
+  )
+
+  return ok(await buildState(member, currentDeviceId))
+}
+
+async function handleAcknowledgeCapacityNotice(event, member) {
+  const noticeId = cleanText(event.noticeId, 100)
+  if (!noticeId) return fail('INVALID_NOTICE', '通知无效')
+
+  await db
+    .collection('members')
+    .where({
+      _id: member._id,
+      capacityNoticeDeliveredId: noticeId,
+    })
+    .update({
+      capacityNoticeAcknowledgedAt: nowIso(),
+    })
+
+  return ok({ acknowledged: true })
+}
+
 async function handleRemoveMember(event, member, currentDeviceId) {
   const room = await getRoom(member.roomId)
   if (!room || room.ownerId !== member._id) {
@@ -849,7 +951,11 @@ async function dispatch(event = {}) {
     const { member, session } = context
 
     if (event.action === 'getState') {
-      const state = await buildState(member, session._id)
+      const state = await buildState(
+        member,
+        session._id,
+        Boolean(event.claimCapacityNotice),
+      )
       return state ? ok(state) : fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
     }
     if (event.action === 'updateStatus') {
@@ -860,6 +966,12 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'regenerateInvite') {
       return await handleRegenerateInvite(member, session._id)
+    }
+    if (event.action === 'updateRoomCapacity') {
+      return await handleUpdateRoomCapacity(event, member, session._id)
+    }
+    if (event.action === 'acknowledgeCapacityNotice') {
+      return await handleAcknowledgeCapacityNotice(event, member)
     }
     if (event.action === 'removeMember') {
       return await handleRemoveMember(event, member, session._id)

@@ -12,6 +12,7 @@ import {
   Users,
 } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
+import type { RoomCapacity } from '../types/dorm'
 
 const {
   phase,
@@ -31,6 +32,8 @@ const roomName = ref('')
 const nickname = ref('')
 const inviteCode = ref(inviteFromUrl.toUpperCase())
 const accountCode = ref('')
+const roomCapacity = ref<RoomCapacity>(4)
+const capacityOptions: RoomCapacity[] = [4, 6]
 const submitting = ref(false)
 const formError = ref('')
 
@@ -82,7 +85,7 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     if (mode.value === 'create') {
-      await createRoom(roomName.value, nickname.value)
+      await createRoom(roomName.value, nickname.value, roomCapacity.value)
     } else if (mode.value === 'join') {
       await joinRoom(inviteCode.value, nickname.value)
     } else if (mode.value === 'bind') {
@@ -158,6 +161,27 @@ async function submit(): Promise<void> {
           <span class="field__label">宿舍名称</span>
           <input v-model="roomName" type="text" maxlength="20" placeholder="输入宿舍名称" />
         </label>
+
+        <fieldset v-if="mode === 'create'" class="field field--fieldset">
+          <legend class="field__label">宿舍房型</legend>
+          <div class="capacity-options">
+            <button
+              v-for="capacity in capacityOptions"
+              :key="capacity"
+              type="button"
+              class="capacity-option"
+              :class="{ 'capacity-option--active': roomCapacity === capacity }"
+              :aria-pressed="roomCapacity === capacity"
+              @click="roomCapacity = capacity"
+            >
+              <Users :size="18" stroke-width="1.8" aria-hidden="true" />
+              <span>
+                <strong>{{ capacity }} 人寝</strong>
+                <small>最多 {{ capacity }} 位成员</small>
+              </span>
+            </button>
+          </div>
+        </fieldset>
 
         <label v-else-if="mode === 'join'" class="field">
           <span class="field__label">

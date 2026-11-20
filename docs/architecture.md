@@ -15,8 +15,8 @@
 
 CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 
-- `rooms`：宿舍名称、邀请码、创建者、容量和关闭状态。
-- `members`：成员昵称、身份、恢复码哈希、加入时间和活跃状态。
+- `rooms`：宿舍名称、邀请码、创建者、四人或六人容量、房型变更通知和关闭状态。
+- `members`：成员昵称、身份、恢复码哈希、容量通知投递状态、加入时间和活跃状态。
 - `statuses`：每个成员当前唯一的宿舍状态。
 - `deviceSessions`：成员账号下的设备令牌哈希、设备标签、最近在线和撤销状态。
 - `deviceLinks`：短时设备绑定码哈希、有效期和使用状态。
@@ -31,6 +31,8 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - `recoverAccount` 使用长期恢复码创建新设备会话。
 - `listDevices` 和 `revokeDevice` 用于设备管理。
 - `rotateRecoveryCode` 重新生成恢复码并立即使旧码失效。
+- `updateRoomCapacity` 由当前房主在四人寝与六人寝之间切换容量。
+- `acknowledgeCapacityNotice` 记录其他成员已经确认房型变更。
 
 ## 权限
 
@@ -40,6 +42,9 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - 被移除或退出宿舍的令牌立即失效。
 - 退出当前设备只撤销该设备会话，不退出宿舍。
 - 邀请码更新后旧邀请码不能再加入。
+- 六人寝只有在有效成员不超过 4 人时才能降回四人寝。
+- 房型变化不修改邀请码。
+- 房型变更只向其他成员投递通知，且按成员账号只投递给最先访问的一台设备。
 
 ## 同步与到期
 

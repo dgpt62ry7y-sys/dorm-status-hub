@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { Home, Settings, Users } from 'lucide-vue-next'
 import AccessGate from './components/AccessGate.vue'
+import CapacityNoticeDialog from './components/CapacityNoticeDialog.vue'
 import SecretCodeDialog from './components/SecretCodeDialog.vue'
 import { useDormStore } from './composables/useDormStore'
 
@@ -27,6 +28,9 @@ const cloudLabel = computed(() => {
   if (isSyncing.value) return '同步中'
   return state.room.name
 })
+const roomTypeLabel = computed(() =>
+  state.room.capacity === 6 ? '六人共享空间' : '四人共享空间',
+)
 
 onMounted(() => {
   void initialize()
@@ -45,7 +49,7 @@ onMounted(() => {
           </span>
           <span>
             <strong>宿舍状态共享站</strong>
-            <small>四人共享空间</small>
+            <small>{{ roomTypeLabel }}</small>
           </span>
         </RouterLink>
 
@@ -93,5 +97,6 @@ onMounted(() => {
       @close="dismissSecretDialog"
       @confirm="confirmSecretDialog"
     />
+    <CapacityNoticeDialog />
   </div>
 </template>
