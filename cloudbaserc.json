@@ -31,6 +31,22 @@
       "public": true,
       "gatewayPath": "/dormsyncApi",
       "description": "DormSync public HTTP API"
+    },
+    {
+      "name": "dormsyncCleanup",
+      "dir": "cloudfunctions/api",
+      "runtime": "Nodejs20.19",
+      "handler": "index.cleanup",
+      "timeout": 60,
+      "memorySize": 256,
+      "description": "DormSync expired room cleanup",
+      "triggers": [
+        {
+          "name": "hourly-room-cleanup",
+          "type": "timer",
+          "config": "0 0 * * * * *"
+        }
+      ]
     }
   ]
 }

@@ -224,6 +224,18 @@ textarea:focus-visible {
   transform: translateX(-50%);
 }
 
+.nav-notice-dot {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid #ffffff;
+  border-radius: 50%;
+  background: #e44f38;
+  box-shadow: 0 0 0 2px rgba(228, 79, 56, 0.12);
+}
+
 .desktop-nav a:hover,
 .desktop-nav a.router-link-active {
   color: var(--ink);
@@ -1555,7 +1567,8 @@ textarea:focus-visible {
 
 .capacity-dialog,
 .capacity-notice-dialog,
-.release-notice-dialog {
+.release-notice-dialog,
+.room-verification-dialog {
   position: relative;
   display: grid;
   width: min(460px, 100%);
@@ -1571,6 +1584,32 @@ textarea:focus-visible {
 .release-notice-dialog {
   width: min(500px, 100%);
   max-height: min(760px, calc(100dvh - 48px));
+}
+
+.room-verification-dialog {
+  width: min(470px, 100%);
+}
+
+.verification-deadline {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff6f1;
+  color: #8b4936;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.verification-form {
+  display: grid;
+  gap: 14px;
+}
+
+.verification-form .button {
+  width: 100%;
+}
+
+.verification-leave {
+  justify-self: center;
 }
 
 .release-notice-dialog__heading {
@@ -1784,7 +1823,9 @@ textarea:focus-visible {
 .dialog-enter-active .capacity-notice-dialog,
 .dialog-leave-active .capacity-notice-dialog,
 .dialog-enter-active .release-notice-dialog,
-.dialog-leave-active .release-notice-dialog {
+.dialog-leave-active .release-notice-dialog,
+.dialog-enter-active .room-verification-dialog,
+.dialog-leave-active .room-verification-dialog {
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1800,7 +1841,9 @@ textarea:focus-visible {
 .dialog-enter-from .capacity-notice-dialog,
 .dialog-leave-to .capacity-notice-dialog,
 .dialog-enter-from .release-notice-dialog,
-.dialog-leave-to .release-notice-dialog {
+.dialog-leave-to .release-notice-dialog,
+.dialog-enter-from .room-verification-dialog,
+.dialog-leave-to .room-verification-dialog {
   transform: translateY(10px) scale(0.985);
 }
 
@@ -2453,6 +2496,27 @@ textarea:focus-visible {
   font-weight: 650;
 }
 
+.settings-version-row > div {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.version-update-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #c94530;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.version-update-link:hover {
+  text-decoration: underline;
+}
+
 .privacy-note {
   display: flex;
   gap: 10px;
@@ -2708,6 +2772,156 @@ textarea:focus-visible {
 
 .bottom-nav {
   display: none;
+}
+
+.local-test {
+  position: fixed;
+  z-index: 150;
+  bottom: 22px;
+  left: 22px;
+}
+
+.local-test__trigger {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid #cfc8b8;
+  border-radius: 999px;
+  background: #fffdf7;
+  color: #57524a;
+  box-shadow: 0 8px 24px rgba(35, 31, 25, 0.12);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.local-test__trigger i {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: #1d1e20;
+  color: #fff;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.local-test__panel {
+  width: min(330px, calc(100vw - 24px));
+  padding: 15px;
+  border: 1px solid #d8d3c7;
+  border-radius: 15px;
+  background: #fffdf8;
+  box-shadow: 0 18px 50px rgba(31, 27, 21, 0.18);
+}
+
+.local-test__panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.local-test__panel > header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.local-test__panel > header button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #f0ede6;
+  color: #6d675e;
+  cursor: pointer;
+}
+
+.local-test__empty,
+.local-test__accounts {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.local-test__empty p,
+.local-test__accounts p {
+  color: #777168;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.local-test__empty > button,
+.local-test__accounts > button,
+.local-test__reset {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #e0ddd5;
+  border-radius: 10px;
+  background: #fff;
+  color: #4f4b45;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.local-test__empty > button {
+  justify-content: center;
+  border-color: #222326;
+  background: #222326;
+  color: #fff;
+}
+
+.local-test__accounts > button > span {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #ece8df;
+  font-size: 9px;
+}
+
+.local-test__accounts > button > i {
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #ff5a36;
+  color: #fff;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.local-test__accounts > button.active {
+  border-color: #222326;
+  background: #f7f5ef;
+}
+
+.local-test__reset {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+  color: #a34735;
+}
+
+.local-test__error {
+  margin-top: 10px;
+  color: #a34735;
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 /* Bencho-inspired visual system: neutral surfaces, compact controls, restrained motion. */
@@ -3679,7 +3893,8 @@ textarea:focus-visible {
   .secret-dialog,
   .capacity-dialog,
   .capacity-notice-dialog,
-  .release-notice-dialog {
+  .release-notice-dialog,
+  .room-verification-dialog {
     border-radius: 20px;
   }
 
@@ -3726,6 +3941,11 @@ textarea:focus-visible {
     backdrop-filter: blur(18px);
   }
 
+  .local-test {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    left: 12px;
+  }
+
   .bottom-nav a {
     position: relative;
     display: flex;
@@ -3737,6 +3957,11 @@ textarea:focus-visible {
     color: #858b86;
     font-size: 9px;
     font-weight: 650;
+  }
+
+  .bottom-nav .nav-notice-dot {
+    top: 8px;
+    right: calc(50% - 16px);
   }
 
   .bottom-nav a.router-link-active {
@@ -3817,7 +4042,8 @@ textarea:focus-visible {
   .secret-dialog,
   .capacity-dialog,
   .capacity-notice-dialog,
-  .release-notice-dialog {
+  .release-notice-dialog,
+  .room-verification-dialog {
     gap: 19px;
     padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
   }

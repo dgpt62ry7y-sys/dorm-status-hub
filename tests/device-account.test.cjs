@@ -5,6 +5,9 @@ const {
   installCloudBaseMock,
 } = require('./support/memory-cloudbase.cjs')
 
+process.env.DORMSYNC_CREATOR_KEY = 'test-creator-key'
+process.env.DORMSYNC_ADMIN_KEY = 'test-admin-key'
+
 const database = createMemoryDatabase()
 const restoreCloudBase = installCloudBaseMock(database)
 const backend = require(path.join(__dirname, '..', 'cloudfunctions', 'api', 'index.js'))
@@ -43,6 +46,7 @@ async function run() {
       roomName: `多设备测试${suffix}`,
       nickname: `房主${suffix}`,
       deviceLabel: 'Windows · Chrome',
+      creatorKey: 'test-creator-key',
     }),
     'createRoom',
   )
@@ -318,6 +322,7 @@ async function run() {
       roomName: `非法容量${suffix}`,
       nickname: `非法容量${suffix}`,
       capacity: 5,
+      creatorKey: 'test-creator-key',
     }),
     'INVALID_CAPACITY',
   )
@@ -329,6 +334,7 @@ async function run() {
       nickname: `六人房主${suffix}`,
       deviceLabel: 'Windows · Chrome',
       capacity: 6,
+      creatorKey: 'test-creator-key',
     }),
     'create six-person room',
   )

@@ -6,6 +6,9 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(import.meta.dirname, '..')
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const releases = require(path.join(root, 'cloudfunctions', 'api', 'releases.cjs'))
+const versionSource = await readFile(path.join(root, 'version.config.ts'), 'utf8')
+const appVersionMatch = /APP_VERSION\s*=\s*['"]([^'"]+)['"]/.exec(versionSource)
+const appVersion = appVersionMatch?.[1]
 
 function versionParts(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
@@ -27,6 +30,12 @@ function compareVersions(left, right) {
 
 if (!Array.isArray(releases) || releases.length === 0) {
   throw new Error('Release notes are missing')
+}
+
+if (appVersion !== packageJson.version) {
+  throw new Error(
+    `version.config.ts ${appVersion || 'is missing'} does not match package.json ${packageJson.version}`,
+  )
 }
 
 const versions = new Set()

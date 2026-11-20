@@ -69,6 +69,7 @@ export const cloudDormApi = {
     nickname: string
     deviceLabel: string
     capacity: RoomCapacity
+    creatorKey: string
   }) {
     return callApi<SessionResult>('createRoom', input)
   },
@@ -162,6 +163,13 @@ export const cloudDormApi = {
     return callApi<{ acknowledged: true }>('acknowledgeReleaseNotice', {
       memberToken,
       noticeId,
+    })
+  },
+
+  verifyExistingRoom(memberToken: string, creatorKey: string) {
+    return callApi<DormState>('verifyExistingRoom', {
+      memberToken,
+      creatorKey,
     })
   },
 }

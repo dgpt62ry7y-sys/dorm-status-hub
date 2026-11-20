@@ -20,6 +20,7 @@ function createMemoryDatabase() {
       this.name = name
       this.query = query
       this.max = Infinity
+      this.offset = 0
     }
 
     where(query) {
@@ -32,11 +33,16 @@ function createMemoryDatabase() {
       return this
     }
 
+    skip(offset) {
+      this.offset = offset
+      return this
+    }
+
     async get() {
       return {
         data: rows(this.name)
           .filter((row) => matches(row, this.query))
-          .slice(0, this.max)
+          .slice(this.offset, this.offset + this.max)
           .map(clone),
       }
     }
@@ -83,6 +89,11 @@ function createMemoryDatabase() {
           if (!row) throw new Error(`Missing ${name}/${id}`)
           Object.assign(row, clone(patch))
           return { updated: 1 }
+        },
+        async delete() {
+          const index = rows(name).findIndex((item) => item._id === id)
+          if (index >= 0) rows(name).splice(index, 1)
+          return { deleted: index >= 0 ? 1 : 0 }
         },
       }
     }

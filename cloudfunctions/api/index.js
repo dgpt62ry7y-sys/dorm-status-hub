@@ -10,6 +10,10 @@ const MAX_ROOM_CAPACITY = 6
 const VALID_ROOM_CAPACITIES = new Set([4, 6])
 const MAX_DEVICES = 5
 const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
+const SECURITY_WINDOW_MS = 15 * 60 * 1000
+const MAX_SECURITY_ATTEMPTS = 5
+const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
+const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
 const TIMED_STATUSES = new Set(['sleep', 'focus', 'away'])
 const REQUIRED_TIME_STATUSES = new Set(['sleep', 'away'])
@@ -22,10 +26,13 @@ const COLLECTIONS = [
   'deviceSessions',
   'deviceLinks',
   'releaseClaims',
+  'securityAttempts',
+  'systemSettings',
 ]
 const CURRENT_RELEASE_VERSION = releases.at(-1).version
 
 let collectionsReady
+let verificationRolloutPromise
 
 function ok(data) {
   return { ok: true, data }
@@ -123,12 +130,98 @@ async function ensureCollections() {
 }
 
 async function getDocument(collectionName, id) {
-  const result = await db.collection(collectionName).doc(id).get()
-  return result.data?.[0] ?? null
+  try {
+    const result = await db.collection(collectionName).doc(id).get()
+    return result.data?.[0] ?? null
+  } catch (error) {
+    if (
+      error?.code === 'DOCUMENT_NOT_FOUND' ||
+      String(error?.message || '').toLowerCase().includes('document not found')
+    ) {
+      return null
+    }
+    throw error
+  }
 }
 
 async function getRoom(roomId) {
   return getDocument('rooms', roomId)
+}
+
+function configuredSecret(envName) {
+  return String(process.env[envName] ?? '').trim()
+}
+
+async function verifyConfiguredSecret(event, suppliedValue, envName, scope) {
+  const expected = configuredSecret(envName)
+  if (!expected) {
+    return {
+      valid: false,
+      response: fail('SERVER_KEY_NOT_CONFIGURED', '服务端密钥尚未配置'),
+    }
+  }
+
+  const windowId = Math.floor(Date.now() / SECURITY_WINDOW_MS)
+  const attemptId = hashToken(
+    `${scope}:${String(event.clientIp || 'local')}:${windowId}`,
+  )
+  const attempt = await getDocument('securityAttempts', attemptId)
+  if ((attempt?.count || 0) >= MAX_SECURITY_ATTEMPTS) {
+    return {
+      valid: false,
+      response: fail('TOO_MANY_ATTEMPTS', '尝试次数过多，请稍后再试'),
+    }
+  }
+
+  if (String(suppliedValue ?? '').trim() !== expected) {
+    await db.collection('securityAttempts').doc(attemptId).set({
+      scope,
+      clientIp: String(event.clientIp || 'local'),
+      windowId,
+      count: (attempt?.count || 0) + 1,
+      updatedAt: nowIso(),
+    })
+    return {
+      valid: false,
+      response: fail('INVALID_SECRET', '密钥错误'),
+    }
+  }
+
+  if (attempt) {
+    const { _id: _ignoredId, ...attemptData } = attempt
+    await db.collection('securityAttempts').doc(attemptId).set({
+      ...attemptData,
+      count: 0,
+      updatedAt: nowIso(),
+    })
+  }
+  return { valid: true, response: null }
+}
+
+async function getRoomVerificationRollout() {
+  if (verificationRolloutPromise) return verificationRolloutPromise
+  verificationRolloutPromise = loadRoomVerificationRollout()
+  return verificationRolloutPromise
+}
+
+async function loadRoomVerificationRollout() {
+  const id = 'room-verification-rollout-v1'
+  let setting = await getDocument('systemSettings', id)
+  if (!setting) {
+    const startedAt = nowIso()
+    try {
+      await db.collection('systemSettings').doc(id).set({
+        startedAt,
+        fallbackAt: new Date(
+          Date.parse(startedAt) + EXISTING_ROOM_FALLBACK_MS,
+        ).toISOString(),
+      })
+    } catch (error) {
+      if (!isDuplicateRecordError(error)) throw error
+    }
+    setting = await getDocument('systemSettings', id)
+  }
+  return setting
 }
 
 async function getActiveMembers(roomId) {
@@ -387,6 +480,48 @@ async function takeReleaseNotice(member) {
   }
 }
 
+function isRoomVerified(room) {
+  return Boolean(
+    room.creatorKeyVerifiedAt || room.verificationStatus === 'verified',
+  )
+}
+
+async function getRoomVerification(room, member, rollout) {
+  if (isRoomVerified(room)) return null
+
+  const now = Date.now()
+  const fallbackAt =
+    room.verificationFallbackAt ||
+    rollout.fallbackAt ||
+    new Date(Date.parse(rollout.startedAt) + EXISTING_ROOM_FALLBACK_MS).toISOString()
+  let promptedAt = room.verificationPromptedAt || null
+  let deadlineAt = room.verificationDeadlineAt || null
+  const isOwner = room.ownerId === member._id
+
+  if (isOwner && !promptedAt) {
+    promptedAt = nowIso()
+    deadlineAt = new Date(
+      Math.min(Date.parse(promptedAt) + EXISTING_ROOM_VERIFY_MS, Date.parse(fallbackAt)),
+    ).toISOString()
+    await db.collection('rooms').doc(room._id).update({
+      verificationPromptedAt: promptedAt,
+      verificationDeadlineAt: deadlineAt,
+      verificationFallbackAt: fallbackAt,
+      updatedAt: promptedAt,
+    })
+  }
+
+  const effectiveDeadlineAt = deadlineAt || fallbackAt
+  return {
+    required: true,
+    expired: now >= Date.parse(effectiveDeadlineAt),
+    isOwner,
+    promptedAt,
+    deadlineAt,
+    fallbackAt,
+  }
+}
+
 async function buildState(
   member,
   currentDeviceId = '',
@@ -395,6 +530,13 @@ async function buildState(
 ) {
   const room = await getRoom(member.roomId)
   if (!room || room.closed) return null
+
+  const verificationRollout = await getRoomVerificationRollout()
+  const verification = await getRoomVerification(room, member, verificationRollout)
+  if (verification?.expired) {
+    await deleteRoomRecords(room)
+    return null
+  }
 
   const capacityNotice = claimCapacityNotice
     ? await takeCapacityNotice(member, room)
@@ -433,6 +575,16 @@ async function buildState(
     },
     currentMemberId: member._id,
     currentDeviceId,
+    serverVersion: CURRENT_RELEASE_VERSION,
+    roomVerification: verification
+      ? {
+          required: true,
+          isOwner: verification.isOwner,
+          promptedAt: verification.promptedAt,
+          deadlineAt: verification.deadlineAt,
+          fallbackAt: verification.fallbackAt,
+        }
+      : null,
     capacityNotice,
     releaseNotice,
     members: members.map((item) => ({
@@ -522,6 +674,14 @@ async function handleCreateRoom(event) {
     return fail('INVALID_CAPACITY', '宿舍容量只能是四人寝或六人寝')
   }
 
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.creatorKey,
+    'DORMSYNC_CREATOR_KEY',
+    'create-room',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
   const created = await db.runTransaction(async (transaction) => {
     const rooms = transaction.collection('rooms')
     const inviteCode = await generateUniqueCode(rooms)
@@ -535,6 +695,8 @@ async function handleCreateRoom(event) {
       createdAt,
       updatedAt: createdAt,
       closed: false,
+      verificationStatus: 'verified',
+      creatorKeyVerifiedAt: createdAt,
     })
     const roomId = insertedId(roomResult)
     const member = await insertMember(transaction, {
@@ -983,6 +1145,38 @@ async function handleAcknowledgeReleaseNotice(event, member) {
   return ok({ acknowledged: true })
 }
 
+async function handleVerifyRoomKey(event, member, currentDeviceId) {
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId !== member._id) {
+    return fail('ONLY_OWNER', '只有房主可以完成寝室验证')
+  }
+  if (isRoomVerified(room)) {
+    return ok(await buildState(member, currentDeviceId))
+  }
+
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.creatorKey,
+    'DORMSYNC_CREATOR_KEY',
+    'verify-existing-room',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const verifiedAt = nowIso()
+  await db.collection('rooms').doc(member.roomId).update({
+    verificationStatus: 'verified',
+    creatorKeyVerifiedAt: verifiedAt,
+    verificationPromptedAt: null,
+    verificationDeadlineAt: null,
+    verificationFallbackAt: null,
+    verifiedBy: member._id,
+    updatedAt: verifiedAt,
+  })
+
+  return ok(await buildState(member, currentDeviceId))
+}
+
 async function handleRemoveMember(event, member, currentDeviceId) {
   const room = await getRoom(member.roomId)
   if (!room || room.ownerId !== member._id) {
@@ -1058,6 +1252,145 @@ async function handleLeaveRoom(member) {
   return ok({ left: true })
 }
 
+async function deleteCollectionRows(collectionName, query, limit = 100) {
+  const result = await db
+    .collection(collectionName)
+    .where(query)
+    .limit(limit)
+    .get()
+  await Promise.all(
+    result.data.map((row) => db.collection(collectionName).doc(row._id).delete()),
+  )
+  return result.data.length
+}
+
+async function deleteRoomRecords(room) {
+  if (!room?._id) return
+  const members = await getActiveMembers(room._id)
+  await Promise.all(
+    members.map(async (member) => {
+      await Promise.all([
+        deleteCollectionRows('deviceSessions', { memberId: member._id }),
+        deleteCollectionRows('deviceLinks', { memberId: member._id }),
+        deleteCollectionRows('releaseClaims', { memberId: member._id }),
+      ])
+      await db.collection('members').doc(member._id).delete()
+    }),
+  )
+  await Promise.all([
+    deleteCollectionRows('statuses', { roomId: room._id }),
+    deleteCollectionRows('deviceSessions', { roomId: room._id }),
+    deleteCollectionRows('deviceLinks', { roomId: room._id }),
+    deleteCollectionRows('members', { roomId: room._id }),
+    deleteCollectionRows('releaseClaims', { roomId: room._id }),
+  ])
+  await db.collection('rooms').doc(room._id).delete()
+}
+
+async function listAllRooms() {
+  const rooms = []
+  const pageSize = 100
+  for (let offset = 0; offset < 1000; offset += pageSize) {
+    const result = await db
+      .collection('rooms')
+      .limit(pageSize)
+      .skip(offset)
+      .get()
+    rooms.push(...result.data)
+    if (result.data.length < pageSize) break
+  }
+  return rooms
+}
+
+async function cleanupExpiredUnverifiedRooms() {
+  const rollout = await getRoomVerificationRollout()
+  const rooms = await listAllRooms()
+  let deleted = 0
+  for (const room of rooms) {
+    if (isRoomVerified(room)) continue
+    const fallbackAt =
+      room.verificationFallbackAt ||
+      rollout.fallbackAt ||
+      new Date(Date.parse(rollout.startedAt) + EXISTING_ROOM_FALLBACK_MS).toISOString()
+    const deadlineAt = room.verificationDeadlineAt || fallbackAt
+    if (Date.now() >= Date.parse(deadlineAt)) {
+      await deleteRoomRecords(room)
+      deleted += 1
+    }
+  }
+  return { checked: rooms.length, deleted }
+}
+
+async function handleAdminListRooms(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-list-rooms',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const rollout = await getRoomVerificationRollout()
+  const rooms = await listAllRooms()
+  const summaries = []
+  for (const room of rooms) {
+    const members = await getActiveMembers(room._id)
+    const owner = members.find((member) => member._id === room.ownerId)
+    const latestMemberSeen = members
+      .map((member) => Date.parse(member.lastSeenAt || ''))
+      .filter((value) => Number.isFinite(value))
+    const fallbackAt =
+      room.verificationFallbackAt ||
+      rollout.fallbackAt ||
+      new Date(Date.parse(rollout.startedAt) + EXISTING_ROOM_FALLBACK_MS).toISOString()
+    const deadlineAt = room.verificationDeadlineAt || fallbackAt
+    summaries.push({
+      id: room._id,
+      name: room.name,
+      ownerNickname: owner?.nickname || '',
+      memberCount: members.length,
+      capacity: room.capacity || DEFAULT_ROOM_CAPACITY,
+      createdAt: room.createdAt || null,
+      lastActiveAt:
+        latestMemberSeen.length > 0
+          ? new Date(Math.max(...latestMemberSeen)).toISOString()
+          : room.updatedAt || room.createdAt || null,
+      verificationStatus: isRoomVerified(room) ? 'verified' : 'pending',
+      verificationPromptedAt: room.verificationPromptedAt || null,
+      verificationDeadlineAt: isRoomVerified(room) ? null : deadlineAt,
+      verificationFallbackAt: isRoomVerified(room) ? null : fallbackAt,
+      closed: Boolean(room.closed),
+    })
+  }
+  summaries.sort(
+    (left, right) =>
+      Date.parse(right.lastActiveAt || '') - Date.parse(left.lastActiveAt || ''),
+  )
+  return ok({ rooms: summaries })
+}
+
+const VERIFICATION_BYPASS_ACTIONS = new Set([
+  'getState',
+  'verifyExistingRoom',
+  'revokeDevice',
+  'leaveRoom',
+])
+
+async function roomVerificationGate(member, action) {
+  if (VERIFICATION_BYPASS_ACTIONS.has(action)) return null
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+
+  const rollout = await getRoomVerificationRollout()
+  const verification = await getRoomVerification(room, member, rollout)
+  if (!verification) return null
+  if (verification.expired) {
+    await deleteRoomRecords(room)
+    return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  }
+  return fail('ROOM_VERIFICATION_REQUIRED', '寝室等待房主完成授权验证')
+}
+
 async function dispatch(event = {}) {
   try {
     await ensureCollections()
@@ -1066,10 +1399,13 @@ async function dispatch(event = {}) {
     if (event.action === 'joinRoom') return await handleJoinRoom(event)
     if (event.action === 'claimDeviceLink') return await handleClaimDeviceLink(event)
     if (event.action === 'recoverAccount') return await handleRecoverAccount(event)
+    if (event.action === 'adminListRooms') return await handleAdminListRooms(event)
 
     const context = await findAuthenticatedContext(event.memberToken)
     if (!context) return fail('AUTH_REQUIRED', '登录状态已失效，请重新绑定或恢复账号')
     const { member, session } = context
+    const verificationBlock = await roomVerificationGate(member, event.action)
+    if (verificationBlock) return verificationBlock
 
     if (event.action === 'getState') {
       const state = await buildState(
@@ -1097,6 +1433,9 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'acknowledgeReleaseNotice') {
       return await handleAcknowledgeReleaseNotice(event, member)
+    }
+    if (event.action === 'verifyExistingRoom') {
+      return await handleVerifyRoomKey(event, member, session._id)
     }
     if (event.action === 'removeMember') {
       return await handleRemoveMember(event, member, session._id)
@@ -1128,6 +1467,24 @@ function parseHttpPayload(event) {
   return JSON.parse(rawBody)
 }
 
+function requestClientIp(event) {
+  const forwarded =
+    event.headers?.['x-forwarded-for'] ||
+    event.headers?.['X-Forwarded-For'] ||
+    ''
+  return (
+    event.requestContext?.http?.sourceIp ||
+    String(forwarded).split(',')[0].trim() ||
+    'unknown'
+  )
+}
+
+exports.cleanup = async () => {
+  await ensureCollections()
+  const result = await cleanupExpiredUnverifiedRooms()
+  return ok(result)
+}
+
 exports.main = async (event = {}) => {
   if (!event.httpMethod && !event.requestContext?.http) {
     return dispatch(event)
@@ -1135,6 +1492,9 @@ exports.main = async (event = {}) => {
 
   const responseHeaders = {
     'content-type': 'application/json; charset=utf-8',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': 'content-type',
   }
 
   if (event.httpMethod === 'OPTIONS') {
@@ -1143,6 +1503,7 @@ exports.main = async (event = {}) => {
 
   try {
     const payload = parseHttpPayload(event)
+    payload.clientIp = requestClientIp(event)
     const result = await dispatch(payload)
     return {
       statusCode: 200,

@@ -34,6 +34,7 @@ const inviteCode = ref(inviteFromUrl.toUpperCase())
 const accountCode = ref('')
 const roomCapacity = ref<RoomCapacity>(4)
 const capacityOptions: RoomCapacity[] = [4, 6]
+const creatorKey = ref('')
 const submitting = ref(false)
 const formError = ref('')
 
@@ -58,6 +59,7 @@ const intro = computed(() => {
 function switchMode(nextMode: AccessMode): void {
   mode.value = nextMode
   accountCode.value = ''
+  if (nextMode !== 'create') creatorKey.value = ''
   formError.value = ''
 }
 
@@ -73,6 +75,10 @@ async function submit(): Promise<void> {
       formError.value = '请填写宿舍名称'
       return
     }
+    if (mode.value === 'create' && !creatorKey.value.trim()) {
+      formError.value = '请输入创建密钥'
+      return
+    }
     if (mode.value === 'join' && !inviteCode.value.trim()) {
       formError.value = '请输入邀请码'
       return
@@ -85,7 +91,12 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     if (mode.value === 'create') {
-      await createRoom(roomName.value, nickname.value, roomCapacity.value)
+      await createRoom(
+        roomName.value,
+        nickname.value,
+        roomCapacity.value,
+        creatorKey.value,
+      )
     } else if (mode.value === 'join') {
       await joinRoom(inviteCode.value, nickname.value)
     } else if (mode.value === 'bind') {
@@ -182,6 +193,20 @@ async function submit(): Promise<void> {
             </button>
           </div>
         </fieldset>
+
+        <label v-if="mode === 'create'" class="field">
+          <span class="field__label">
+            <KeyRound :size="16" aria-hidden="true" />
+            创建密钥
+          </span>
+          <input
+            v-model="creatorKey"
+            type="password"
+            maxlength="32"
+            autocomplete="off"
+            placeholder="请输入授权创建密钥"
+          />
+        </label>
 
         <label v-else-if="mode === 'join'" class="field">
           <span class="field__label">

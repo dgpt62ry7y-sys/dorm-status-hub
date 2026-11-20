@@ -12,10 +12,13 @@ import { STATUS_OPTIONS, type DormStatus } from '../types/dorm'
 const {
   state,
   currentMember,
+  updateAvailable,
+  refreshToLatest,
   saveProfile,
   leaveRoom,
 } = useDormStore()
 const router = useRouter()
+const appVersion = __APP_VERSION__
 
 const nickname = ref(currentMember.value?.nickname ?? '')
 const defaultStatus = ref<DormStatus>(state.preferences.defaultStatus)
@@ -172,9 +175,19 @@ onBeforeUnmount(() => {
             <span>我的身份</span>
             <strong>{{ currentMember?.role === 'owner' ? '创建者' : '成员' }}</strong>
           </div>
-          <div>
+          <div class="settings-version-row">
             <span>版本</span>
-            <strong>1.4.0 状态体验版</strong>
+            <div>
+              <strong>{{ appVersion }}</strong>
+              <button
+                v-if="updateAvailable"
+                type="button"
+                class="version-update-link"
+                @click="refreshToLatest"
+              >
+                有新版本，请刷新页面
+              </button>
+            </div>
           </div>
         </section>
 

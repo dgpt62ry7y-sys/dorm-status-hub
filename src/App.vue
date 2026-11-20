@@ -3,7 +3,9 @@ import { computed, onMounted } from 'vue'
 import { Home, Settings, Users } from 'lucide-vue-next'
 import AccessGate from './components/AccessGate.vue'
 import CapacityNoticeDialog from './components/CapacityNoticeDialog.vue'
+import LocalTestPanel from './components/LocalTestPanel.vue'
 import ReleaseNoticeDialog from './components/ReleaseNoticeDialog.vue'
+import RoomVerificationDialog from './components/RoomVerificationDialog.vue'
 import SecretCodeDialog from './components/SecretCodeDialog.vue'
 import { useDormStore } from './composables/useDormStore'
 
@@ -19,6 +21,7 @@ const {
   isOnline,
   isSyncing,
   secretDialog,
+  updateAvailable,
   initialize,
   dismissSecretDialog,
   confirmSecretDialog,
@@ -59,6 +62,11 @@ onMounted(() => {
             <RouterLink v-for="item in navItems" :key="item.to" :to="item.to">
               <component :is="item.icon" :size="16" stroke-width="1.8" aria-hidden="true" />
               {{ item.label }}
+              <i
+                v-if="item.to === '/settings' && updateAvailable"
+                class="nav-notice-dot"
+                aria-label="有新版本"
+              ></i>
             </RouterLink>
           </nav>
           <span
@@ -85,6 +93,11 @@ onMounted(() => {
       <RouterLink v-for="item in navItems" :key="item.to" :to="item.to">
         <component :is="item.icon" :size="21" stroke-width="1.8" aria-hidden="true" />
         <span>{{ item.label }}</span>
+        <i
+          v-if="item.to === '/settings' && updateAvailable"
+          class="nav-notice-dot"
+          aria-label="有新版本"
+        ></i>
       </RouterLink>
     </nav>
 
@@ -100,5 +113,7 @@ onMounted(() => {
     />
     <ReleaseNoticeDialog />
     <CapacityNoticeDialog />
+    <RoomVerificationDialog />
+    <LocalTestPanel />
   </div>
 </template>

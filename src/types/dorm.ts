@@ -16,6 +16,14 @@ export interface ReleaseNotice {
   items: string[]
 }
 
+export interface RoomVerification {
+  required: boolean
+  isOwner: boolean
+  promptedAt: string | null
+  deadlineAt: string | null
+  fallbackAt: string
+}
+
 export interface Member {
   id: string
   nickname: string
@@ -44,6 +52,8 @@ export interface DormState {
   statuses: StatusRecord[]
   currentMemberId: string
   currentDeviceId: string
+  serverVersion: string
+  roomVerification?: RoomVerification | null
   capacityNotice?: CapacityNotice | null
   releaseNotice?: ReleaseNotice | null
   preferences: {

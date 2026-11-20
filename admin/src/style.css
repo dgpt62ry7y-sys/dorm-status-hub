@@ -1,0 +1,283 @@
+:root {
+  color: #1b1c1d;
+  background: #f4f3ef;
+  font-family:
+    "Segoe UI Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 720px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.admin-shell {
+  width: min(1320px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 48px 0 80px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid #d9d6ce;
+}
+
+.admin-header h1 {
+  margin: 8px 0 0;
+  font-size: 48px;
+  line-height: 1;
+}
+
+.admin-header p:last-child {
+  margin-top: 12px;
+  color: #67645d;
+  font-size: 13px;
+}
+
+.admin-eyebrow {
+  color: #8c887f;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.admin-secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid #dbd7cf;
+  border-radius: 999px;
+  background: #fff;
+  color: #56534d;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.admin-gate {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 28px;
+  padding: 18px;
+  border: 1px solid #dedbd3;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.admin-gate label {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-gate label span {
+  color: #716e67;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.admin-gate input,
+.admin-search input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dedbd3;
+  border-radius: 9px;
+  outline: none;
+}
+
+.admin-gate input:focus,
+.admin-search input:focus {
+  border-color: #1b1c1d;
+  box-shadow: 0 0 0 3px rgba(27, 28, 29, 0.08);
+}
+
+.admin-gate button,
+.admin-summary button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 15px;
+  border: 1px solid #1b1c1d;
+  border-radius: 999px;
+  background: #1b1c1d;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.admin-gate button:disabled,
+.admin-summary button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.admin-gate .admin-logout {
+  border-color: #dedbd3;
+  background: #f7f6f2;
+  color: #625f59;
+}
+
+.admin-error {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #ebc9c1;
+  border-radius: 10px;
+  background: #fff4f1;
+  color: #913d2b;
+  font-size: 11px;
+}
+
+.admin-summary {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 28px;
+}
+
+.admin-summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 90px;
+}
+
+.admin-summary span {
+  color: #89857d;
+  font-size: 9px;
+}
+
+.admin-summary strong {
+  font-size: 21px;
+}
+
+.admin-summary button {
+  min-height: 36px;
+  margin-left: auto;
+  border-color: #dedbd3;
+  background: #fff;
+  color: #4f4c47;
+}
+
+.admin-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 22px;
+  padding: 0 12px;
+  border: 1px solid #dedbd3;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.admin-search input {
+  height: 40px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.admin-table-wrap {
+  margin-top: 14px;
+  overflow: auto;
+  border: 1px solid #ddd9d1;
+  border-radius: 14px;
+  background: #fff;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+th,
+td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #ece9e3;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: #858178;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+td strong,
+td small {
+  display: block;
+}
+
+td small {
+  max-width: 220px;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #969188;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-status {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f1f0ec;
+  color: #66625b;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.admin-status--verified {
+  background: #e6f5ec;
+  color: #21724e;
+}
+
+.admin-status--pending {
+  background: #fff0e8;
+  color: #a24c30;
+}
+
+.admin-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 45px;
+  color: #89857d;
+  font-size: 11px;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

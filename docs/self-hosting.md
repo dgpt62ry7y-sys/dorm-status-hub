@@ -118,6 +118,8 @@ cp .env.example .env.local
 ```env
 VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://your-api-domain/dormsyncApi
+DORMSYNC_CREATOR_KEY=你的寝室创建密钥
+DORMSYNC_ADMIN_KEY=你的本地管理密钥
 ```
 
 不要提交 `.env.local`。项目的 `.gitignore` 已将它排除。
@@ -134,8 +136,10 @@ npm run deploy:api
 - 从 `.env.local` 读取你的环境 ID。
 - 显式把 `--env-id 你的环境ID` 传给 CloudBase CLI。
 - 部署 HTTP 云函数 `dormsyncHttp`。
+- 部署定时清理云函数 `dormsyncCleanup`。
 - 配置网关路径 `/dormsyncApi`。
 - 检测云函数依赖；首次部署缺少 `node_modules` 时交给 CloudBase CLI 安装依赖。
+- 生成仅用于本次部署的临时配置，把两个密钥写入云函数环境变量，部署完成后删除临时配置。
 
 仓库中的 `cloudbaserc.json` 可能仍包含项目维护者的默认环境 ID，但 npm 部署脚本会显式使用 `.env.local` 中的环境 ID，不会依赖该默认值。你自己手工执行 CLI 命令时也要确认使用了 `--env-id`。
 
@@ -156,6 +160,8 @@ https://你的网关地址/dormsyncApi
 ```env
 VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://你的网关地址/dormsyncApi
+DORMSYNC_CREATOR_KEY=你的寝室创建密钥
+DORMSYNC_ADMIN_KEY=你的本地管理密钥
 ```
 
 ## 第七步：构建前端
@@ -206,6 +212,7 @@ CloudBase CLI 会在输出中给出静态网站地址。
 
 - [ ] 静态网站可以打开。
 - [ ] 可以创建四人寝或六人寝。
+- [ ] 创建寝室时会校验授权创建密钥。
 - [ ] 可以用邀请码加入宿舍。
 - [ ] 第二个浏览器或手机可以加入并同步状态。
 - [ ] 同一成员账号可以绑定第二台设备。
@@ -214,7 +221,33 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - [ ] 专注学习和外出可以填写留言。
 - [ ] 到期状态会恢复正常并清空旧留言。
 - [ ] 首次调用 API 后数据库集合已创建。
+- [ ] 定时清理云函数 `dormsyncCleanup` 已创建。
 - [ ] CloudBase 账单归属于你自己的账号和环境。
+
+## 本地管理站
+
+项目包含一个只在本机运行的管理站：
+
+```bash
+npm run admin
+```
+
+打开终端输出的 localhost 地址，输入 `.env.local` 中配置的 `DORMSYNC_ADMIN_KEY`。管理站只读取寝室名称、房主、人数、容量、活动时间和验证状态，不显示成员留言或任何密钥。
+
+## 本地六账号测试环境
+
+运行：
+
+```bash
+npm run dev:test
+```
+
+本地测试环境使用独立内存数据库，不连接正式 CloudBase：
+
+- 首次打开为空环境。
+- 测试面板可以初始化一个六人寝和六个账号。
+- 点击账号可以在同一浏览器切换身份。
+- 可以重置全部虚拟数据。
 
 ## 后续更新
 
@@ -234,6 +267,8 @@ npm run deploy
 3. 构建前端。
 4. 使用 `.env.local` 中的环境 ID 部署云函数。
 5. 使用同一个环境 ID 部署静态网站。
+
+`dormsyncHttp` 与 `dormsyncCleanup` 会同时部署。创建密钥和管理密钥只通过部署时生成的临时配置写入 `dormsyncHttp` 环境变量，不会写入 `cloudbaserc.json`。
 
 如果 API 网关地址发生变化，必须先更新 `.env.local` 的 `VITE_DORMSYNC_API_URL`，再重新构建。
 
@@ -296,6 +331,14 @@ CloudBase 默认测试域名首次访问时可能出现一次安全确认。具�
 ### 页面能打开但无法创建或加入宿舍
 
 通常是前端 API 地址、云函数网关或数据库资源不一致。先检查浏览器网络请求，再查看云函数日志和 CloudBase 控制台。
+
+### 创建寝室时一直提示密钥错误
+
+检查 `.env.local` 中是否设置了 `DORMSYNC_CREATOR_KEY`，然后重新执行 `npm run deploy:api`。只修改本地变量但没有重新部署云函数时，线上仍使用旧密钥。
+
+### 存量寝室被锁定
+
+这是寝室授权迁移的保护状态。当前房主首次进入后需要在 12 小时内输入创建密钥；功能上线 3 天后仍未触发的存量寝室会被定时任务清理。
 
 ## 不要放进前端配置的内容
 

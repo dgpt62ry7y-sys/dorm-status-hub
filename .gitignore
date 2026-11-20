@@ -6,3 +6,4 @@ dist/
 *.local
 work/
 outputs/
+.cloudbaserc.local.json

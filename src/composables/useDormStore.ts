@@ -36,6 +36,8 @@ function createEmptyState(): DormState {
     },
     currentMemberId: '',
     currentDeviceId: '',
+    serverVersion: '',
+    roomVerification: null,
     members: [],
     statuses: [],
     preferences: {
@@ -56,6 +58,7 @@ const devicesLoading = ref(false)
 const secretDialog = ref<SecretDialogState | null>(null)
 const capacityNoticeDialog = ref<CapacityNotice | null>(null)
 const releaseNoticeDialog = ref<ReleaseNotice | null>(null)
+const initialServerVersion = ref('')
 
 let pollTimer: number | undefined
 let refreshInFlight: Promise<void> | null = null
@@ -67,6 +70,8 @@ function applyState(next: DormState): void {
   state.room = next.room
   state.currentMemberId = next.currentMemberId
   state.currentDeviceId = next.currentDeviceId || ''
+  state.serverVersion = next.serverVersion || ''
+  state.roomVerification = next.roomVerification || null
   state.members = next.members
   state.statuses = next.statuses
   state.preferences = next.preferences
@@ -94,6 +99,7 @@ function clearSession(): void {
   secretDialog.value = null
   capacityNoticeDialog.value = null
   releaseNoticeDialog.value = null
+  initialServerVersion.value = ''
   stopPolling()
 }
 
@@ -119,6 +125,16 @@ function dismissSecretDialog(): void {
 
 function confirmSecretDialog(): void {
   secretDialog.value = null
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0)
+    if (difference !== 0) return difference
+  }
+  return 0
 }
 
 function startPolling(): void {
@@ -206,6 +222,7 @@ async function initialize(): Promise<void> {
   try {
     const next = await cloudDormApi.getState(memberToken.value, true, true)
     applyState(next)
+    initialServerVersion.value = next.serverVersion || ''
     phase.value = 'ready'
     isOnline.value = true
     startPolling()
@@ -232,14 +249,19 @@ async function createRoom(
   roomName: string,
   nickname: string,
   capacity: RoomCapacity,
+  creatorKey: string,
 ): Promise<void> {
   const result = await cloudDormApi.createRoom({
     roomName,
     nickname,
     deviceLabel: getDeviceLabel(),
     capacity,
+    creatorKey,
   })
   saveSession(result.memberToken, result.state)
+  if (!initialServerVersion.value) {
+    initialServerVersion.value = result.state.serverVersion || ''
+  }
   if (result.recoveryCode) showRecoveryCode(result.recoveryCode, true)
 }
 
@@ -250,6 +272,9 @@ async function joinRoom(inviteCode: string, nickname: string): Promise<void> {
     deviceLabel: getDeviceLabel(),
   })
   saveSession(result.memberToken, result.state)
+  if (!initialServerVersion.value) {
+    initialServerVersion.value = result.state.serverVersion || ''
+  }
   if (result.recoveryCode) showRecoveryCode(result.recoveryCode, true)
 }
 
@@ -259,6 +284,9 @@ async function linkDevice(code: string): Promise<void> {
     deviceLabel: getDeviceLabel(),
   })
   saveSession(result.memberToken, result.state)
+  if (!initialServerVersion.value) {
+    initialServerVersion.value = result.state.serverVersion || ''
+  }
 }
 
 async function recoverAccount(recoveryCode: string): Promise<void> {
@@ -267,6 +295,9 @@ async function recoverAccount(recoveryCode: string): Promise<void> {
     deviceLabel: getDeviceLabel(),
   })
   saveSession(result.memberToken, result.state)
+  if (!initialServerVersion.value) {
+    initialServerVersion.value = result.state.serverVersion || ''
+  }
 }
 
 async function saveStatus(update: StatusUpdate): Promise<void> {
@@ -372,6 +403,20 @@ async function acknowledgeReleaseNotice(noticeId: string): Promise<void> {
   releaseNoticeDialog.value = null
 }
 
+async function verifyExistingRoom(creatorKey: string): Promise<void> {
+  const next = await cloudDormApi.verifyExistingRoom(memberToken.value, creatorKey)
+  applyState(next)
+}
+
+async function refreshToLatest(): Promise<void> {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration()
+    await registration?.update()
+  } finally {
+    window.location.reload()
+  }
+}
+
 async function regenerateInvite(): Promise<string> {
   const result = await cloudDormApi.regenerateInvite(memberToken.value)
   applyState(result.state)
@@ -398,13 +443,22 @@ export function useDormStore() {
   )
   const isOwner = computed(() => state.room.ownerId === state.currentMemberId)
   const releaseNoticeVisible = computed(
-    () => Boolean(releaseNoticeDialog.value) && !secretDialog.value,
+    () =>
+      Boolean(releaseNoticeDialog.value) &&
+      !secretDialog.value &&
+      !state.roomVerification?.required,
   )
   const capacityNoticeVisible = computed(
     () =>
       Boolean(capacityNoticeDialog.value) &&
       !secretDialog.value &&
-      !releaseNoticeDialog.value,
+      !releaseNoticeDialog.value &&
+      !state.roomVerification?.required,
+  )
+  const updateAvailable = computed(
+    () =>
+      Boolean(initialServerVersion.value) &&
+      compareVersions(initialServerVersion.value, __APP_VERSION__) > 0,
   )
 
   return {
@@ -421,6 +475,7 @@ export function useDormStore() {
     releaseNoticeDialog,
     releaseNoticeVisible,
     capacityNoticeVisible,
+    updateAvailable,
     currentMember,
     memberCount,
     availableSeats,
@@ -447,6 +502,8 @@ export function useDormStore() {
     updateRoomCapacity,
     acknowledgeCapacityNotice,
     acknowledgeReleaseNotice,
+    verifyExistingRoom,
+    refreshToLatest,
     dismissSecretDialog,
     confirmSecretDialog,
     clearSession,
