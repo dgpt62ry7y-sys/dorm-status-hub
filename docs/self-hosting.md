@@ -141,7 +141,7 @@ npm run deploy:api
 - 检测云函数依赖；首次部署缺少 `node_modules` 时交给 CloudBase CLI 安装依赖。
 - 生成仅用于本次部署的临时配置，把两个密钥写入云函数环境变量，部署完成后删除临时配置。
 
-仓库中的 `cloudbaserc.json` 可能仍包含项目维护者的默认环境 ID，但 npm 部署脚本会显式使用 `.env.local` 中的环境 ID，不会依赖该默认值。你自己手工执行 CLI 命令时也要确认使用了 `--env-id`。
+仓库中的 `cloudbaserc.json` 是通用模板，不包含维护者环境 ID。npm 部署脚本会从 `.env.local` 读取你的环境 ID 并显式传入 `--env-id`。你自己手工执行 CLI 命令时也要确认使用了 `--env-id`。
 
 ## 第六步：获取自己的 HTTP API 地址
 

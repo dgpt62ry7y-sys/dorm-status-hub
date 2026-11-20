@@ -41,7 +41,7 @@
 - 部署脚本从 `CLOUDBASE_ENV_ID` 或 `.env.local` 的 `VITE_CLOUDBASE_ENV_ID` 获取环境 ID。
 - 云函数和静态托管命令都显式传入 `--env-id`。
 - 构建前检查 `VITE_CLOUDBASE_ENV_ID` 和 `VITE_DORMSYNC_API_URL`，缺失或仍为占位值时失败。
-- 保留当前 `cloudbaserc.json` 作为维护者默认配置，但 npm 部署入口不得依赖它选择环境。
+- `cloudbaserc.json` 使用不含个人环境 ID 的通用模板，npm 部署入口必须显式传入部署者环境 ID。
 
 ### 文档
 

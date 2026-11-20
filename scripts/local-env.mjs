@@ -33,6 +33,6 @@ export async function loadLocalEnvironment(root) {
 export function isPlaceholder(value) {
   return (
     !value ||
-    /your-env-id|your-api-domain|your-cloudbase|example/i.test(String(value))
+    /^your-|your-env-id|your-api-domain|your-cloudbase/i.test(String(value))
   )
 }
