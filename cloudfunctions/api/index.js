@@ -486,6 +486,7 @@ async function handleCreateDeviceLink(member) {
   }
 
   const code = createDeviceLinkCode()
+  const codeHash = hashToken(code)
   const createdAt = nowIso()
   const expiresAt = new Date(Date.now() + DEVICE_LINK_TTL_MS).toISOString()
 
@@ -501,10 +502,10 @@ async function handleCreateDeviceLink(member) {
         revokedAt: createdAt,
       })
     }
-    await transaction.collection('deviceLinks').add({
+    await transaction.collection('deviceLinks').doc(codeHash).set({
       memberId: member._id,
       roomId: member.roomId,
-      codeHash: hashToken(code),
+      codeHash,
       active: true,
       createdAt,
       expiresAt,
@@ -522,78 +523,63 @@ async function handleClaimDeviceLink(event) {
     return fail('DEVICE_LINK_INVALID', '绑定码无效，请重新输入')
   }
 
-  const memberToken = randomToken()
-  try {
-    const claimed = await db.runTransaction(async (transaction) => {
-      const linkResult = await transaction
-        .collection('deviceLinks')
-        .where({ codeHash: hashToken(code) })
-        .limit(1)
-        .get()
-      const link = linkResult.data[0]
-      if (!link) throw new Error('DEVICE_LINK_INVALID')
-      if (link.usedAt) throw new Error('DEVICE_LINK_USED')
-      if (link.revokedAt || link.active === false) {
-        throw new Error('DEVICE_LINK_INVALID')
-      }
-      if (!link.expiresAt || Date.parse(link.expiresAt) <= Date.now()) {
-        await transaction.collection('deviceLinks').doc(link._id).update({
-          active: false,
-          revokedAt: nowIso(),
-        })
-        throw new Error('DEVICE_LINK_EXPIRED')
-      }
-
-      const memberResult = await transaction.collection('members').doc(link.memberId).get()
-      const member = memberResult.data?.[0]
-      if (!member || !member.active) throw new Error('DEVICE_LINK_INVALID')
-
-      const roomResult = await transaction.collection('rooms').doc(member.roomId).get()
-      const room = roomResult.data?.[0]
-      if (!room || room.closed) throw new Error('DEVICE_LINK_INVALID')
-
-      const sessions = await transaction
-        .collection('deviceSessions')
-        .where({ memberId: member._id, active: true })
-        .limit(MAX_DEVICES)
-        .get()
-      if (sessions.data.length >= MAX_DEVICES) {
-        throw new Error('DEVICE_LIMIT_REACHED')
-      }
-
-      const sessionId = await insertDeviceSession(
-        transaction.collection('deviceSessions'),
-        {
-          memberId: member._id,
-          roomId: member.roomId,
-          memberToken,
-          label: deviceLabel(event.deviceLabel),
-        },
-      )
-      await transaction.collection('deviceLinks').doc(link._id).update({
-        active: false,
-        usedAt: nowIso(),
-        usedBySessionId: sessionId,
-      })
-
-      return { member, sessionId }
-    })
-
-    const state = await buildState(claimed.member, claimed.sessionId)
-    if (!state) return fail('DEVICE_LINK_INVALID', '绑定码已失效')
-    return ok({ memberToken, state })
-  } catch (error) {
-    if (error.message === 'DEVICE_LINK_EXPIRED') {
-      return fail('DEVICE_LINK_EXPIRED', '绑定码已过期，请在原设备重新生成')
-    }
-    if (error.message === 'DEVICE_LINK_USED') {
-      return fail('DEVICE_LINK_USED', '绑定码已经使用过，请重新生成')
-    }
-    if (error.message === 'DEVICE_LIMIT_REACHED') {
-      return fail('DEVICE_LIMIT_REACHED', '账号已经绑定 5 台设备')
-    }
+  const codeHash = hashToken(code)
+  const link = await getDocument('deviceLinks', codeHash)
+  if (!link) return fail('DEVICE_LINK_INVALID', '绑定码无效，请重新输入')
+  if (link.usedAt) {
+    return fail('DEVICE_LINK_USED', '绑定码已经使用过，请重新生成')
+  }
+  if (link.revokedAt || link.active === false) {
     return fail('DEVICE_LINK_INVALID', '绑定码无效，请重新输入')
   }
+  if (!link.expiresAt || Date.parse(link.expiresAt) <= Date.now()) {
+    await db.collection('deviceLinks').doc(codeHash).update({
+      active: false,
+      revokedAt: nowIso(),
+    })
+    return fail('DEVICE_LINK_EXPIRED', '绑定码已过期，请在原设备重新生成')
+  }
+
+  const member = await getDocument('members', link.memberId)
+  if (!member || !member.active) {
+    return fail('DEVICE_LINK_INVALID', '绑定码无效，请重新输入')
+  }
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) {
+    return fail('DEVICE_LINK_INVALID', '绑定码无效，请重新输入')
+  }
+
+  const sessions = await getActiveDeviceSessions(member._id)
+  if (sessions.length >= MAX_DEVICES) {
+    return fail('DEVICE_LIMIT_REACHED', '账号已经绑定 5 台设备')
+  }
+
+  const usedAt = nowIso()
+  const claimResult = await db
+    .collection('deviceLinks')
+    .where({ _id: codeHash, active: true, usedAt: null })
+    .update({
+      active: false,
+      usedAt,
+    })
+  if ((claimResult.updated || 0) !== 1) {
+    return fail('DEVICE_LINK_USED', '绑定码已经使用过，请重新生成')
+  }
+
+  const memberToken = randomToken()
+  const sessionId = await insertDeviceSession(db.collection('deviceSessions'), {
+    memberId: member._id,
+    roomId: member.roomId,
+    memberToken,
+    label: deviceLabel(event.deviceLabel),
+  })
+  await db.collection('deviceLinks').doc(codeHash).update({
+    usedBySessionId: sessionId,
+  })
+
+  const state = await buildState(member, sessionId)
+  if (!state) return fail('DEVICE_LINK_INVALID', '绑定码已失效')
+  return ok({ memberToken, state })
 }
 
 async function handleRecoverAccount(event) {
@@ -602,51 +588,36 @@ async function handleRecoverAccount(event) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
 
-  const memberToken = randomToken()
-  try {
-    const recovered = await db.runTransaction(async (transaction) => {
-      const memberResult = await transaction
-        .collection('members')
-        .where({ recoveryCodeHash: hashToken(code), active: true })
-        .limit(1)
-        .get()
-      const member = memberResult.data[0]
-      if (!member) throw new Error('RECOVERY_CODE_INVALID')
-
-      const roomResult = await transaction.collection('rooms').doc(member.roomId).get()
-      const room = roomResult.data?.[0]
-      if (!room || room.closed) throw new Error('RECOVERY_CODE_INVALID')
-
-      const sessions = await transaction
-        .collection('deviceSessions')
-        .where({ memberId: member._id, active: true })
-        .limit(MAX_DEVICES)
-        .get()
-      if (sessions.data.length >= MAX_DEVICES) {
-        throw new Error('DEVICE_LIMIT_REACHED')
-      }
-
-      const sessionId = await insertDeviceSession(
-        transaction.collection('deviceSessions'),
-        {
-          memberId: member._id,
-          roomId: member.roomId,
-          memberToken,
-          label: deviceLabel(event.deviceLabel),
-        },
-      )
-      return { member, sessionId }
-    })
-
-    const state = await buildState(recovered.member, recovered.sessionId)
-    if (!state) return fail('RECOVERY_CODE_INVALID', '恢复码已失效')
-    return ok({ memberToken, state })
-  } catch (error) {
-    if (error.message === 'DEVICE_LIMIT_REACHED') {
-      return fail('DEVICE_LIMIT_REACHED', '账号已经绑定 5 台设备')
-    }
+  const memberResult = await db
+    .collection('members')
+    .where({ recoveryCodeHash: hashToken(code), active: true })
+    .limit(1)
+    .get()
+  const member = memberResult.data[0]
+  if (!member) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
+
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) {
+    return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
+  }
+
+  const sessions = await getActiveDeviceSessions(member._id)
+  if (sessions.length >= MAX_DEVICES) {
+    return fail('DEVICE_LIMIT_REACHED', '账号已经绑定 5 台设备')
+  }
+
+  const memberToken = randomToken()
+  const sessionId = await insertDeviceSession(db.collection('deviceSessions'), {
+    memberId: member._id,
+    roomId: member.roomId,
+    memberToken,
+    label: deviceLabel(event.deviceLabel),
+  })
+  const state = await buildState(member, sessionId)
+  if (!state) return fail('RECOVERY_CODE_INVALID', '恢复码已失效')
+  return ok({ memberToken, state })
 }
 
 async function listMemberDevices(memberId, currentDeviceId) {
@@ -832,38 +803,30 @@ async function handleRemoveMember(event, member, currentDeviceId) {
 }
 
 async function handleLeaveRoom(member) {
-  await db.runTransaction(async (transaction) => {
-    const rooms = transaction.collection('rooms')
-    const members = transaction.collection('members')
-    const roomResult = await rooms.doc(member.roomId).get()
-    const room = roomResult.data?.[0]
-    if (!room) throw new Error('ROOM_NOT_FOUND')
+  const room = await getRoom(member.roomId)
+  if (!room) throw new Error('ROOM_NOT_FOUND')
 
-    await members.doc(member._id).update({
-      active: false,
-      leftAt: nowIso(),
-    })
-
-    if (room.ownerId === member._id) {
-      const nextResult = await members
-        .where({ roomId: member.roomId, active: true })
-        .limit(ROOM_CAPACITY)
-        .get()
-      const nextOwner = nextResult.data.find((item) => item._id !== member._id)
-      if (nextOwner) {
-        await members.doc(nextOwner._id).update({ role: 'owner' })
-        await rooms.doc(member.roomId).update({
-          ownerId: nextOwner._id,
-          updatedAt: nowIso(),
-        })
-      } else {
-        await rooms.doc(member.roomId).update({
-          closed: true,
-          updatedAt: nowIso(),
-        })
-      }
-    }
+  await db.collection('members').doc(member._id).update({
+    active: false,
+    leftAt: nowIso(),
   })
+
+  if (room.ownerId === member._id) {
+    const nextMembers = await getActiveMembers(member.roomId)
+    const nextOwner = nextMembers.find((item) => item._id !== member._id)
+    if (nextOwner) {
+      await db.collection('members').doc(nextOwner._id).update({ role: 'owner' })
+      await db.collection('rooms').doc(member.roomId).update({
+        ownerId: nextOwner._id,
+        updatedAt: nowIso(),
+      })
+    } else {
+      await db.collection('rooms').doc(member.roomId).update({
+        closed: true,
+        updatedAt: nowIso(),
+      })
+    }
+  }
 
   await Promise.all([
     revokeMemberSessions(member._id),
@@ -910,7 +873,6 @@ async function dispatch(event = {}) {
     if (event.action === 'rotateRecoveryCode') {
       return await handleRotateRecoveryCode(member)
     }
-
     return fail('UNKNOWN_ACTION', '未知操作')
   } catch (error) {
     console.error(error)

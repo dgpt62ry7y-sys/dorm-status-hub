@@ -47,6 +47,14 @@ function createMemoryDatabase() {
       rows(this.name).push({ ...clone(value), _id: id })
       return { id }
     }
+
+    async update(patch) {
+      const matched = rows(this.name)
+        .filter((row) => matches(row, this.query))
+        .slice(0, this.max)
+      for (const row of matched) Object.assign(row, clone(patch))
+      return { updated: matched.length }
+    }
   }
 
   class Collection extends Query {
@@ -56,6 +64,13 @@ function createMemoryDatabase() {
         async get() {
           const row = rows(name).find((item) => item._id === id)
           return { data: row ? [clone(row)] : [] }
+        },
+        async set(value) {
+          const index = rows(name).findIndex((item) => item._id === id)
+          const next = { ...clone(value), _id: id }
+          if (index >= 0) rows(name)[index] = next
+          else rows(name).push(next)
+          return { id }
         },
         async update(patch) {
           const row = rows(name).find((item) => item._id === id)
