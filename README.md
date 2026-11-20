@@ -180,7 +180,33 @@ npm run build
 
 ## 许可证
 
-本项目使用 [MIT License](LICENSE)。
+本项目使用 [MIT License](LICENSE)，版权声明为 `Copyright (c) 2026 BAI`。
+
+MIT License 允许使用、复制、修改、合并、发布、分发、再许可和/或销售软件副本，也允许商业使用。分发本软件或其重要部分时，必须保留原版权声明和 MIT 许可证文本。
+
+软件按“原样”提供，不附带任何明示或默示担保；完整条款与免责声明见 [LICENSE](LICENSE)。
+
+MIT License 授权的是代码，不自动授予 DormSync 名称、Logo 或官方身份的使用权，也不代表获得官方合作、维护或背书。品牌边界、建议性来源标注和第三方素材说明见 [许可证与署名说明](docs/ATTRIBUTION.md)。
+
+## 二次开发来源标注
+
+维护者鼓励在 README、关于页面或项目文档中注明原项目来源，但这不是 MIT License 之外的强制条件。MIT 也没有要求二次开发者公开修改后的源代码。
+
+可以直接使用以下示例：
+
+```text
+本项目基于 DormSync 开发。
+原项目：https://github.com/dgpt62ry7y-sys/dorm-status-hub
+本项目经过独立修改，非 DormSync 官方发布版本。
+```
+
+```text
+Based on DormSync
+Original project: https://github.com/dgpt62ry7y-sys/dorm-status-hub
+This project has been modified. It is not an official DormSync release.
+```
+
+更完整的品牌说明和第三方许可证列表见 [docs/ATTRIBUTION.md](docs/ATTRIBUTION.md)。
 
 ## 致谢
 
