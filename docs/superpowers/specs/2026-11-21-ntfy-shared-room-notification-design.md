@@ -92,7 +92,7 @@
 
 - 发布地址由服务端配置，默认 `https://ntfy.sh`。
 - 使用 Node.js 内置 `fetch`。
-- Header 使用 `Priority: 4`、`Markdown: no`。
+- Header 使用 `Priority: 4`、`Tags: bell`，正文保持纯文本默认格式。
 - 中文标题使用 RFC 2047 UTF-8 Base64 编码。
 - 正文使用 UTF-8 纯文本。
 - 日志只记录脱敏后的错误摘要。

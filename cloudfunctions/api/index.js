@@ -268,7 +268,7 @@ async function publishNtfyMessage(topic, title, body) {
           'content-type': 'text/plain; charset=utf-8',
           Title: encodeNtfyHeader(title),
           Priority: '4',
-          Markdown: 'no',
+          Tags: 'bell',
         },
         body,
         signal: controller.signal,

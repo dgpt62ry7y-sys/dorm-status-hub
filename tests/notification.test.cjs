@@ -218,7 +218,7 @@ async function run() {
     'Notification used the wrong publish URL',
   )
   assert(message.headers.Priority === '4', 'Notification priority was not 4')
-  assert(message.headers.Markdown === 'no', 'Markdown mode was not disabled')
+  assert(message.headers.Tags === 'bell', 'Notification bell tag is missing')
   assert(
     /^=\?UTF-8\?B\?.+\?=$/.test(message.headers.Title),
     'Chinese title was not RFC 2047 encoded',
