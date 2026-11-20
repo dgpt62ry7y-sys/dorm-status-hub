@@ -42,8 +42,14 @@ function createMemoryDatabase() {
     }
 
     async add(value) {
-      counter += 1
-      const id = `${this.name}-${counter}`
+      let id = value?._id
+      if (!id) {
+        counter += 1
+        id = `${this.name}-${counter}`
+      }
+      if (rows(this.name).some((row) => row._id === id)) {
+        throw new Error(`Duplicate key: ${id}`)
+      }
       rows(this.name).push({ ...clone(value), _id: id })
       return { id }
     }

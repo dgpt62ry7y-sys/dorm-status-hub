@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { Home, Settings, Users } from 'lucide-vue-next'
 import AccessGate from './components/AccessGate.vue'
 import CapacityNoticeDialog from './components/CapacityNoticeDialog.vue'
+import ReleaseNoticeDialog from './components/ReleaseNoticeDialog.vue'
 import SecretCodeDialog from './components/SecretCodeDialog.vue'
 import { useDormStore } from './composables/useDormStore'
 
@@ -97,6 +98,7 @@ onMounted(() => {
       @close="dismissSecretDialog"
       @confirm="confirmSecretDialog"
     />
+    <ReleaseNoticeDialog />
     <CapacityNoticeDialog />
   </div>
 </template>

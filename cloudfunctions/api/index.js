@@ -1,5 +1,6 @@
 const crypto = require('node:crypto')
 const cloudbase = require('@cloudbase/node-sdk')
+const releases = require('./releases.cjs')
 
 const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV })
 const db = app.database()
@@ -12,7 +13,15 @@ const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
 const TIMED_STATUSES = new Set(['sleep', 'focus'])
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-const COLLECTIONS = ['rooms', 'members', 'statuses', 'deviceSessions', 'deviceLinks']
+const COLLECTIONS = [
+  'rooms',
+  'members',
+  'statuses',
+  'deviceSessions',
+  'deviceLinks',
+  'releaseClaims',
+]
+const CURRENT_RELEASE_VERSION = releases.at(-1).version
 
 let collectionsReady
 
@@ -66,6 +75,23 @@ function normalizeInviteCode(value) {
 
 function normalizeSecret(value) {
   return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function versionParts(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version ?? ''))
+  return match ? match.slice(1).map(Number) : null
+}
+
+function compareVersions(left, right) {
+  const leftParts = versionParts(left)
+  const rightParts = versionParts(right)
+  if (!leftParts || !rightParts) return 0
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] - rightParts[index]
+    }
+  }
+  return 0
 }
 
 function deviceLabel(value) {
@@ -292,13 +318,73 @@ async function takeCapacityNotice(member, room) {
   return (result.updated || 0) === 1 ? notice : null
 }
 
-async function buildState(member, currentDeviceId = '', claimCapacityNotice = false) {
+function isDuplicateRecordError(error) {
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    message.includes('duplicate') ||
+    message.includes('already exist') ||
+    message.includes('duplicate key')
+  )
+}
+
+async function takeReleaseNotice(member) {
+  const lastSeenVersion = versionParts(member.lastSeenReleaseVersion)
+    ? member.lastSeenReleaseVersion
+    : '0.0.0'
+  if (compareVersions(lastSeenVersion, CURRENT_RELEASE_VERSION) >= 0) return null
+
+  const missedReleases = releases.filter(
+    (release) => compareVersions(release.version, lastSeenVersion) > 0,
+  )
+  const items = [...new Set(missedReleases.flatMap((release) => release.items))]
+  if (items.length === 0) return null
+
+  const claimedAt = nowIso()
+  const claimId = hashToken(`${member._id}:${CURRENT_RELEASE_VERSION}`)
+  const fromVersion = compareVersions(lastSeenVersion, '1.0.0') >= 0
+    ? lastSeenVersion
+    : '1.0.0'
+
+  try {
+    await db.collection('releaseClaims').add({
+      _id: claimId,
+      memberId: member._id,
+      fromVersion,
+      toVersion: CURRENT_RELEASE_VERSION,
+      items,
+      claimedAt,
+    })
+  } catch (error) {
+    if (isDuplicateRecordError(error)) return null
+    throw error
+  }
+
+  await db.collection('members').doc(member._id).update({
+    lastSeenReleaseVersion: CURRENT_RELEASE_VERSION,
+    releaseNoticeDeliveredAt: claimedAt,
+  })
+
+  return {
+    id: claimId,
+    fromVersion,
+    toVersion: CURRENT_RELEASE_VERSION,
+    items,
+  }
+}
+
+async function buildState(
+  member,
+  currentDeviceId = '',
+  claimCapacityNotice = false,
+  claimReleaseNotice = false,
+) {
   const room = await getRoom(member.roomId)
   if (!room || room.closed) return null
 
   const capacityNotice = claimCapacityNotice
     ? await takeCapacityNotice(member, room)
     : null
+  const releaseNotice = claimReleaseNotice ? await takeReleaseNotice(member) : null
   const [members, rawStatuses] = await Promise.all([
     getActiveMembers(member.roomId),
     getStatuses(member.roomId),
@@ -333,6 +419,7 @@ async function buildState(member, currentDeviceId = '', claimCapacityNotice = fa
     currentMemberId: member._id,
     currentDeviceId,
     capacityNotice,
+    releaseNotice,
     members: members.map((item) => ({
       id: item._id,
       nickname: item.nickname,
@@ -376,6 +463,7 @@ async function insertMember(transaction, { roomId, nickname, role, label }) {
     defaultStatus: 'normal',
     joinedAt,
     lastSeenAt: joinedAt,
+    lastSeenReleaseVersion: null,
     recoveryCodeHash: hashToken(recoveryCode),
     recoveryCodeUpdatedAt: joinedAt,
   })
@@ -451,7 +539,7 @@ async function handleCreateRoom(event) {
   return ok({
     memberToken: created.member.memberToken,
     recoveryCode: created.member.recoveryCode,
-    state: await buildState(member, created.member.sessionId),
+    state: await buildState(member, created.member.sessionId, false, true),
   })
 }
 
@@ -499,7 +587,7 @@ async function handleJoinRoom(event) {
     return ok({
       memberToken: joined.memberToken,
       recoveryCode: joined.recoveryCode,
-      state: await buildState(member, joined.sessionId),
+    state: await buildState(member, joined.sessionId, false, true),
     })
   } catch (error) {
     if (error.message === 'ROOM_NOT_FOUND') {
@@ -611,7 +699,7 @@ async function handleClaimDeviceLink(event) {
     usedBySessionId: sessionId,
   })
 
-  const state = await buildState(member, sessionId, true)
+  const state = await buildState(member, sessionId, true, true)
   if (!state) return fail('DEVICE_LINK_INVALID', '绑定码已失效')
   return ok({ memberToken, state })
 }
@@ -649,7 +737,7 @@ async function handleRecoverAccount(event) {
     memberToken,
     label: deviceLabel(event.deviceLabel),
   })
-  const state = await buildState(member, sessionId, true)
+  const state = await buildState(member, sessionId, true, true)
   if (!state) return fail('RECOVERY_CODE_INVALID', '恢复码已失效')
   return ok({ memberToken, state })
 }
@@ -862,6 +950,21 @@ async function handleAcknowledgeCapacityNotice(event, member) {
   return ok({ acknowledged: true })
 }
 
+async function handleAcknowledgeReleaseNotice(event, member) {
+  const noticeId = cleanText(event.noticeId, 100)
+  if (!noticeId) return fail('INVALID_NOTICE', '通知无效')
+
+  const claim = await getDocument('releaseClaims', noticeId)
+  if (!claim || claim.memberId !== member._id) {
+    return fail('INVALID_NOTICE', '通知无效')
+  }
+
+  await db.collection('releaseClaims').doc(noticeId).update({
+    acknowledgedAt: nowIso(),
+  })
+  return ok({ acknowledged: true })
+}
+
 async function handleRemoveMember(event, member, currentDeviceId) {
   const room = await getRoom(member.roomId)
   if (!room || room.ownerId !== member._id) {
@@ -955,6 +1058,7 @@ async function dispatch(event = {}) {
         member,
         session._id,
         Boolean(event.claimCapacityNotice),
+        Boolean(event.claimReleaseNotice),
       )
       return state ? ok(state) : fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
     }
@@ -972,6 +1076,9 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'acknowledgeCapacityNotice') {
       return await handleAcknowledgeCapacityNotice(event, member)
+    }
+    if (event.action === 'acknowledgeReleaseNotice') {
+      return await handleAcknowledgeReleaseNotice(event, member)
     }
     if (event.action === 'removeMember') {
       return await handleRemoveMember(event, member, session._id)

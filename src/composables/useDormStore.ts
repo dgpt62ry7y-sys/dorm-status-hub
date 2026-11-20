@@ -6,6 +6,7 @@ import type {
   DeviceSession,
   DormState,
   DormStatus,
+  ReleaseNotice,
   RoomCapacity,
   StatusUpdate,
 } from '../types/dorm'
@@ -54,6 +55,7 @@ const devices = ref<DeviceSession[]>([])
 const devicesLoading = ref(false)
 const secretDialog = ref<SecretDialogState | null>(null)
 const capacityNoticeDialog = ref<CapacityNotice | null>(null)
+const releaseNoticeDialog = ref<ReleaseNotice | null>(null)
 
 let pollTimer: number | undefined
 let refreshInFlight: Promise<void> | null = null
@@ -70,6 +72,7 @@ function applyState(next: DormState): void {
   state.preferences = next.preferences
   lastSyncedAt.value = new Date().toISOString()
   if (next.capacityNotice) capacityNoticeDialog.value = next.capacityNotice
+  if (next.releaseNotice) releaseNoticeDialog.value = next.releaseNotice
 }
 
 function saveSession(token: string, next: DormState): void {
@@ -90,6 +93,7 @@ function clearSession(): void {
   devices.value = []
   secretDialog.value = null
   capacityNoticeDialog.value = null
+  releaseNoticeDialog.value = null
   stopPolling()
 }
 
@@ -137,27 +141,35 @@ function bindLifecycle(): void {
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && memberToken.value) {
-      void refresh(true, true)
+      void refresh(true, true, true)
     }
   })
 
   window.addEventListener('online', () => {
     isOnline.value = true
-    if (memberToken.value) void refresh(true, true)
+    if (memberToken.value) void refresh(true, true, true)
   })
   window.addEventListener('offline', () => {
     isOnline.value = false
   })
 }
 
-async function refresh(silent = true, claimCapacityNotice = false): Promise<void> {
+async function refresh(
+  silent = true,
+  claimCapacityNotice = false,
+  claimReleaseNotice = false,
+): Promise<void> {
   if (!memberToken.value || phase.value !== 'ready') return
   if (refreshInFlight) return refreshInFlight
 
   isSyncing.value = true
   refreshInFlight = (async () => {
     try {
-      const next = await cloudDormApi.getState(memberToken.value, claimCapacityNotice)
+      const next = await cloudDormApi.getState(
+        memberToken.value,
+        claimCapacityNotice,
+        claimReleaseNotice,
+      )
       applyState(next)
       isOnline.value = true
       if (!silent) actionError.value = ''
@@ -192,7 +204,7 @@ async function initialize(): Promise<void> {
   }
 
   try {
-    const next = await cloudDormApi.getState(memberToken.value, true)
+    const next = await cloudDormApi.getState(memberToken.value, true, true)
     applyState(next)
     phase.value = 'ready'
     isOnline.value = true
@@ -355,6 +367,11 @@ async function acknowledgeCapacityNotice(noticeId: string): Promise<void> {
   capacityNoticeDialog.value = null
 }
 
+async function acknowledgeReleaseNotice(noticeId: string): Promise<void> {
+  await cloudDormApi.acknowledgeReleaseNotice(memberToken.value, noticeId)
+  releaseNoticeDialog.value = null
+}
+
 async function regenerateInvite(): Promise<string> {
   const result = await cloudDormApi.regenerateInvite(memberToken.value)
   applyState(result.state)
@@ -380,6 +397,15 @@ export function useDormStore() {
     Math.max(0, state.room.capacity - state.members.length),
   )
   const isOwner = computed(() => state.room.ownerId === state.currentMemberId)
+  const releaseNoticeVisible = computed(
+    () => Boolean(releaseNoticeDialog.value) && !secretDialog.value,
+  )
+  const capacityNoticeVisible = computed(
+    () =>
+      Boolean(capacityNoticeDialog.value) &&
+      !secretDialog.value &&
+      !releaseNoticeDialog.value,
+  )
 
   return {
     state,
@@ -392,6 +418,9 @@ export function useDormStore() {
     devicesLoading,
     secretDialog,
     capacityNoticeDialog,
+    releaseNoticeDialog,
+    releaseNoticeVisible,
+    capacityNoticeVisible,
     currentMember,
     memberCount,
     availableSeats,
@@ -417,6 +446,7 @@ export function useDormStore() {
     rotateRecoveryCode,
     updateRoomCapacity,
     acknowledgeCapacityNotice,
+    acknowledgeReleaseNotice,
     dismissSecretDialog,
     confirmSecretDialog,
     clearSession,

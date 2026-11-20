@@ -20,6 +20,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - `statuses`：每个成员当前唯一的宿舍状态。
 - `deviceSessions`：成员账号下的设备令牌哈希、设备标签、最近在线和撤销状态。
 - `deviceLinks`：短时设备绑定码哈希、有效期和使用状态。
+- `releaseClaims`：全站版本公告的账号级领取和确认记录。
 
 ## API
 
@@ -33,6 +34,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - `rotateRecoveryCode` 重新生成恢复码并立即使旧码失效。
 - `updateRoomCapacity` 由当前房主在四人寝与六人寝之间切换容量。
 - `acknowledgeCapacityNotice` 记录其他成员已经确认房型变更。
+- `acknowledgeReleaseNotice` 记录成员已经确认全站版本更新公告。
 
 ## 权限
 
@@ -45,6 +47,8 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用五个文档集合：
 - 六人寝只有在有效成员不超过 4 人时才能降回四人寝。
 - 房型变化不修改邀请码。
 - 房型变更只向其他成员投递通知，且按成员账号只投递给最先访问的一台设备。
+- 全站版本公告按成员上次已读版本累计，只向最先访问的设备投递一次。
+- 新成员先保存恢复码，再读取从 `1.0.0` 开始的历史累计公告。
 
 ## 同步与到期
 

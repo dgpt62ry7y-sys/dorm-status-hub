@@ -85,8 +85,16 @@ export const cloudDormApi = {
     return callApi<SessionResult>('recoverAccount', input)
   },
 
-  getState(memberToken: string, claimCapacityNotice = false) {
-    return callApi<DormState>('getState', { memberToken, claimCapacityNotice })
+  getState(
+    memberToken: string,
+    claimCapacityNotice = false,
+    claimReleaseNotice = false,
+  ) {
+    return callApi<DormState>('getState', {
+      memberToken,
+      claimCapacityNotice,
+      claimReleaseNotice,
+    })
   },
 
   updateStatus(memberToken: string, update: StatusUpdate) {
@@ -145,6 +153,13 @@ export const cloudDormApi = {
 
   acknowledgeCapacityNotice(memberToken: string, noticeId: string) {
     return callApi<{ acknowledged: true }>('acknowledgeCapacityNotice', {
+      memberToken,
+      noticeId,
+    })
+  },
+
+  acknowledgeReleaseNotice(memberToken: string, noticeId: string) {
+    return callApi<{ acknowledged: true }>('acknowledgeReleaseNotice', {
       memberToken,
       noticeId,
     })

@@ -1,5 +1,6 @@
 const http = require('node:http')
 const path = require('node:path')
+const crypto = require('node:crypto')
 const {
   createMemoryDatabase,
   installCloudBaseMock,
@@ -32,6 +33,40 @@ const server = http.createServer(async (request, response) => {
 
   let body = ''
   for await (const chunk of request) body += chunk
+  let payload = {}
+  try {
+    payload = body ? JSON.parse(body) : {}
+  } catch {
+    // The real backend handles malformed request bodies.
+  }
+
+  if (payload.action === '__testResetReleaseNotice') {
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(String(payload.memberToken || ''))
+      .digest('hex')
+    const session = database.data
+      .get('deviceSessions')
+      .find((item) => item.tokenHash === tokenHash && item.active)
+    const member = session
+      ? database.data.get('members').find((item) => item._id === session.memberId)
+      : null
+    if (member) {
+      member.lastSeenReleaseVersion = payload.lastSeenVersion || '1.2.0'
+      const claims = database.data.get('releaseClaims')
+      for (let index = claims.length - 1; index >= 0; index -= 1) {
+        if (claims[index].memberId === member._id) claims.splice(index, 1)
+      }
+    }
+    response.writeHead(200, { ...cors, 'content-type': 'application/json' })
+    response.end(
+      JSON.stringify({
+        ok: Boolean(member),
+        data: { reset: Boolean(member) },
+      }),
+    )
+    return
+  }
 
   const result = await backend.main({
     httpMethod: request.method,

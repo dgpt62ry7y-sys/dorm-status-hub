@@ -9,6 +9,13 @@ export interface CapacityNotice {
   changedBy: string
 }
 
+export interface ReleaseNotice {
+  id: string
+  fromVersion: string
+  toVersion: string
+  items: string[]
+}
+
 export interface Member {
   id: string
   nickname: string
@@ -38,6 +45,7 @@ export interface DormState {
   currentMemberId: string
   currentDeviceId: string
   capacityNotice?: CapacityNotice | null
+  releaseNotice?: ReleaseNotice | null
   preferences: {
     defaultStatus: DormStatus
   }

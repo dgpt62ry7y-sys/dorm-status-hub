@@ -1551,7 +1551,8 @@ textarea:focus-visible {
 }
 
 .capacity-dialog,
-.capacity-notice-dialog {
+.capacity-notice-dialog,
+.release-notice-dialog {
   position: relative;
   display: grid;
   width: min(460px, 100%);
@@ -1561,6 +1562,73 @@ textarea:focus-visible {
   border-radius: 22px;
   background: #ffffff;
   box-shadow: 0 26px 80px rgba(17, 18, 20, 0.22);
+}
+
+.release-notice-dialog {
+  width: min(500px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+}
+
+.release-notice-dialog__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.release-version {
+  display: inline-flex;
+  min-height: 29px;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #e7e7e3;
+  border-radius: 999px;
+  background: #f7f7f5;
+  color: var(--ink-faint);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.release-note-list {
+  max-height: min(340px, 42vh);
+  overflow-y: auto;
+  padding: 14px 16px;
+  border: 1px solid #e8e8e4;
+  border-radius: 14px;
+  background: #f8f8f6;
+  overscroll-behavior: contain;
+}
+
+.release-note-list ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-note-list li {
+  position: relative;
+  padding-left: 15px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.release-note-list li::before {
+  position: absolute;
+  top: 0.62em;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+.release-notice-dialog > .button {
+  width: 100%;
 }
 
 .capacity-change {
@@ -1710,7 +1778,9 @@ textarea:focus-visible {
 .dialog-enter-active .capacity-dialog,
 .dialog-leave-active .capacity-dialog,
 .dialog-enter-active .capacity-notice-dialog,
-.dialog-leave-active .capacity-notice-dialog {
+.dialog-leave-active .capacity-notice-dialog,
+.dialog-enter-active .release-notice-dialog,
+.dialog-leave-active .release-notice-dialog {
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1724,7 +1794,9 @@ textarea:focus-visible {
 .dialog-enter-from .capacity-dialog,
 .dialog-leave-to .capacity-dialog,
 .dialog-enter-from .capacity-notice-dialog,
-.dialog-leave-to .capacity-notice-dialog {
+.dialog-leave-to .capacity-notice-dialog,
+.dialog-enter-from .release-notice-dialog,
+.dialog-leave-to .release-notice-dialog {
   transform: translateY(10px) scale(0.985);
 }
 
@@ -3598,7 +3670,8 @@ textarea:focus-visible {
 
   .secret-dialog,
   .capacity-dialog,
-  .capacity-notice-dialog {
+  .capacity-notice-dialog,
+  .release-notice-dialog {
     border-radius: 20px;
   }
 
@@ -3735,7 +3808,8 @@ textarea:focus-visible {
 
   .secret-dialog,
   .capacity-dialog,
-  .capacity-notice-dialog {
+  .capacity-notice-dialog,
+  .release-notice-dialog {
     gap: 19px;
     padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
   }

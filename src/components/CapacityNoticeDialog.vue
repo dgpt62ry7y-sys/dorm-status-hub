@@ -3,7 +3,11 @@ import { computed, ref } from 'vue'
 import { ArrowRight, LoaderCircle, UsersRound } from 'lucide-vue-next'
 import { useDormStore } from '../composables/useDormStore'
 
-const { capacityNoticeDialog, acknowledgeCapacityNotice } = useDormStore()
+const {
+  capacityNoticeDialog,
+  capacityNoticeVisible,
+  acknowledgeCapacityNotice,
+} = useDormStore()
 const saving = ref(false)
 const errorMessage = ref('')
 
@@ -30,7 +34,7 @@ async function acknowledge(): Promise<void> {
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="capacityNoticeDialog" class="dialog-layer" role="presentation">
+      <div v-if="capacityNoticeVisible" class="dialog-layer" role="presentation">
         <section
           class="capacity-notice-dialog"
           role="dialog"
@@ -45,19 +49,19 @@ async function acknowledge(): Promise<void> {
             <p class="eyebrow">房型变更</p>
             <h2 id="capacity-notice-title">{{ title }}</h2>
             <p>
-              房主已将宿舍容量调整为 {{ capacityNoticeDialog.to }} 人，邀请码保持不变。
+              房主已将宿舍容量调整为 {{ capacityNoticeDialog?.to }} 人，邀请码保持不变。
             </p>
           </div>
 
           <div class="capacity-change">
             <span>
               <small>原房型</small>
-              <strong>{{ capacityNoticeDialog.from }} 人寝</strong>
+              <strong>{{ capacityNoticeDialog?.from }} 人寝</strong>
             </span>
             <ArrowRight :size="18" aria-hidden="true" />
             <span>
               <small>当前房型</small>
-              <strong>{{ capacityNoticeDialog.to }} 人寝</strong>
+              <strong>{{ capacityNoticeDialog?.to }} 人寝</strong>
             </span>
           </div>
 
