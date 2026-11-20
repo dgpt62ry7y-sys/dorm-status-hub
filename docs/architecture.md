@@ -25,6 +25,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `releaseClaims`：全站版本公告的账号级领取和确认记录。
 - `securityAttempts`：短密钥和未登录接口的限流窗口，使用客户端 IP 哈希而不保存明文 IP。
 - `systemSettings`：存量寝室授权迁移兜底时间、ntfy Topic 惰性初始化抢占记录等系统配置。
+- `pushSubscriptions`：成员自己的 Bark 设备、Key 指纹、加密 Key、设备标签和发送状态。
 
 ## API
 
@@ -45,6 +46,10 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `getNotificationSettings` 向已验证成员返回当前宿舍共享的 ntfy Topic。
 - `rotateNotificationTopic` 由房主生成新的通知 Topic。
 - `sendTestNotification` 由房主发送测试消息，同一宿舍一分钟最多一次。
+- `listBarkDevices` 只返回当前成员的 Bark 设备标签、末 4 位和时间。
+- `registerBarkDevice` 校验 Bark Key、先发送测试通知，成功后加密保存。
+- `testBarkNotification` 测试当前成员自己的已登记 Bark 设备。
+- `removeBarkDevice` 只允许删除当前成员自己的 Bark 设备。
 - `adminListRooms` 为本地只读管理站提供寝室级摘要，需要独立管理密钥。
 
 ## 权限
@@ -61,6 +66,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - 全站版本公告按成员上次已读版本累计，只向最先访问的设备投递一次。
 - 新成员先保存恢复码，再读取从 `1.0.0` 开始的历史累计公告。
 - 只有房主可以轮换通知 Topic 或发送测试通知。
+- 每个成员只能读取、测试和删除自己的 Bark 设备，最多登记 5 台。
 
 ## 宿舍通知
 
@@ -74,6 +80,19 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - 时间统一按北京时间格式化；下一自然日显示“明天 HH:mm”。
 - 安静人数只统计当前有效的 `sleep` 和 `focus`，分母使用宿舍容量。
 - 成员退出或被移除后只标记房主需要轮换，不自动更换 Topic。
+- 成员退出、被移除或寝室清理时删除该成员的 Bark 订阅。
+- 撤销普通浏览器设备不会删除 Bark 订阅。
+
+### Bark 通道
+
+- iPhone/iPad 可以选择 ntfy、Bark 或同时使用两种通道。
+- Bark 使用每台设备自己的 Device Key，不使用宿舍共享 Key。
+- Device Key 使用 AES-256-GCM 加密，密钥来自 `DORMSYNC_BARK_ENCRYPTION_KEY`。
+- 数据库只保存 Key 指纹、末 4 位和认证加密后的密文。
+- Bark 请求固定发送到 `https://api.day.app/push`，用户不能提供任意推送服务器。
+- 同一事件使用相同标题和正文，按宿舍批量发送；重复 Key 在发送前去重。
+- Bark 统一使用 `level: "active"` 和 `group: "DormSync"`。
+- 响应中的设备 Key、请求体和完整错误响应不写入日志。
 
 Topic 在所选 ntfy 服务上是共享秘密，不提供真正的访问控制。知道 Topic 的人可以订阅、读取或伪造消息。昵称、留言、预计时间和安静人数会发送到部署者配置的 ntfy 服务。
 
@@ -90,7 +109,7 @@ Topic 在所选 ntfy 服务上是共享秘密，不提供真正的访问控制�
 
 - `admin/` 是仅在本机运行的只读管理站，不进入正式静态网站构建。
 - `npm run dev:test` 使用内存数据库启动六账号测试环境。
-- 六账号测试环境把 ntfy 请求转发到本地收件箱，不访问真实 ntfy.sh。
+- 六账号测试环境把 ntfy 和 Bark 请求转发到本地收件箱，不访问真实推送服务。
 - 测试控制接口只存在于本地测试服务，不进入 CloudBase 云函数。
 
 ## 同步与到期

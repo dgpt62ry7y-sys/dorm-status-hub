@@ -12,6 +12,7 @@ import {
 } from '@lucide/vue'
 import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
+import BarkNotificationPanel from '../components/BarkNotificationPanel.vue'
 import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
 import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
 import StatusIcon from '../components/StatusIcon.vue'
@@ -156,6 +157,8 @@ onBeforeUnmount(() => {
         </section>
 
         <NotificationSettingsPanel @notify="showToast" />
+
+        <BarkNotificationPanel @notify="showToast" />
 
         <AccountDevicePanel @notify="showToast" />
       </div>

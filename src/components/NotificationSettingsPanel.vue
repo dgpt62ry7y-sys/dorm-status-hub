@@ -40,7 +40,6 @@ let copyTimer: number | undefined
 
 const userAgent = navigator.userAgent
 const isAndroid = /Android/i.test(userAgent)
-const isIOS = /iPhone|iPad|iPod/i.test(userAgent)
 const isWeChat = /MicroMessenger/i.test(userAgent)
 
 const displayTopic = computed(() => {
@@ -88,11 +87,6 @@ async function copyTopic(): Promise<void> {
   copyTimer = window.setTimeout(() => {
     copied.value = false
   }, 1_800)
-}
-
-function markSubscribed(): void {
-  markNotificationTopicSeen()
-  emit('notify', '已隐藏本设备的订阅提醒')
 }
 
 function openAndroidSubscription(): void {
@@ -160,8 +154,8 @@ onBeforeUnmount(() => {
     </div>
 
     <p class="notification-panel__intro">
-      开启后，室友主动修改状态时，可以在 ntfy App 收到宿舍通知。通知通过公共
-      ntfy.sh 转发，可能略有延迟。
+      ntfy 支持 Android、iPhone、iPad 和桌面设备。订阅宿舍共享 Topic 后即可接收通知；
+      你也可以同时在下方登记 Bark，作为 iPhone 的另一条通知通道。
     </p>
 
     <div v-if="needsAttention" class="notification-alert">
@@ -230,35 +224,23 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="notification-steps">
-        <template v-if="isAndroid">
-          <strong>Android 订阅步骤</strong>
-          <p v-if="isWeChat">
-            微信内置浏览器可能拦截 ntfy 深链。若“打开并订阅”没有反应，请复制 Topic
-            后在 ntfy App 中手动添加。
-          </p>
-          <p v-else>
-            点击“打开并订阅”；若未自动完成，请复制 Topic 后在 ntfy App 手动添加。
-          </p>
-        </template>
-        <template v-else-if="isIOS">
-          <strong>iPhone 订阅步骤</strong>
-          <ol>
-            <li>安装并打开 ntfy App。</li>
-            <li>点击添加订阅。</li>
-            <li>粘贴上面复制的 Topic。</li>
-            <li>确认订阅服务器为当前显示的服务器。</li>
-          </ol>
-        </template>
-        <template v-else>
-          <strong>电脑或其他设备</strong>
-          <p>复制 Topic 后，在 ntfy App 或 Web 端添加同一服务器和 Topic。</p>
-        </template>
+        <strong>ntfy 使用说明</strong>
+        <ol>
+          <li>安装 ntfy，确认服务器与上方显示的一致。</li>
+          <li>
+            {{
+              isAndroid
+                ? 'Android 可以点击“打开并订阅”；没有自动完成时，复制 Topic 手动添加。'
+                : '复制 Topic 后在 ntfy App 中手动添加订阅。'
+            }}
+          </li>
+          <li>iPhone 和 Android 都可以使用 ntfy；Bark 是 iPhone/iPad 的可选通道。</li>
+        </ol>
+        <p v-if="isWeChat">
+          微信内置浏览器可能拦截 ntfy 深链。若“打开并订阅”没有反应，请复制 Topic
+          后在 ntfy App 中手动添加。
+        </p>
       </div>
-
-      <button type="button" class="text-button notification-seen" @click="markSubscribed">
-        <Check :size="15" aria-hidden="true" />
-        我已在此设备添加订阅
-      </button>
 
       <div v-if="isOwner" class="notification-owner-actions">
         <button type="button" class="button button--secondary" :disabled="testing" @click="sendTest">

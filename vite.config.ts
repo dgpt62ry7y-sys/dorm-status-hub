@@ -7,4 +7,12 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },
+  server: {
+    proxy: {
+      '/dormsyncApi': {
+        target: 'http://127.0.0.1:8788',
+        changeOrigin: true,
+      },
+    },
+  },
 })

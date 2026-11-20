@@ -22,7 +22,6 @@ const {
   isSyncing,
   secretDialog,
   updateAvailable,
-  notificationTopicUpdateAvailable,
   initialize,
   dismissSecretDialog,
   confirmSecretDialog,
@@ -64,9 +63,9 @@ onMounted(() => {
               <component :is="item.icon" :size="16" stroke-width="1.8" aria-hidden="true" />
               {{ item.label }}
               <i
-                v-if="item.to === '/settings' && (updateAvailable || notificationTopicUpdateAvailable)"
+                v-if="item.to === '/settings' && updateAvailable"
                 class="nav-notice-dot"
-                aria-label="有设置更新"
+                aria-label="有新版本"
               ></i>
             </RouterLink>
           </nav>
@@ -95,9 +94,9 @@ onMounted(() => {
         <component :is="item.icon" :size="21" stroke-width="1.8" aria-hidden="true" />
         <span>{{ item.label }}</span>
         <i
-          v-if="item.to === '/settings' && (updateAvailable || notificationTopicUpdateAvailable)"
+          v-if="item.to === '/settings' && updateAvailable"
           class="nav-notice-dot"
-          aria-label="有设置更新"
+          aria-label="有新版本"
         ></i>
       </RouterLink>
     </nav>

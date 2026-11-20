@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/dgpt62ry7y-sys/dorm-status-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/dgpt62ry7y-sys/dorm-status-hub/actions/workflows/ci.yml)
 
-DormSync 是一个可自行部署的四人寝、六人寝状态共享 Web App。室友通过邀请码加入同一个空间，查看彼此的活动、专注、睡眠和外出状态，并通过可选 ntfy 频道接收状态提醒。
+DormSync 是一个可自行部署的四人寝、六人寝状态共享 Web App。室友通过邀请码加入同一个空间，查看彼此的活动、专注、睡眠和外出状态，并通过 ntfy 或 Bark 接收状态提醒。
 
 项目由个人维护，适合小规模宿舍自用和二次开发。不承诺 SLA，也不宣称已经具备大型生产系统所需的高可用、审计或运维能力。
 
@@ -17,6 +17,7 @@ DormSync 是一个可自行部署的四人寝、六人寝状态共享 Web App。
 - 设备绑定码、账号恢复码和设备撤销
 - 房主管理邀请码、成员和房型
 - 每个宿舍独立的 ntfy 共享通知 Topic
+- iPhone/iPad 通过 Bark Device Key 登记独立推送设备
 - 全站版本公告和设置页功能更新日志
 - 寝室创建密钥、存量寝室验证和定时清理
 - PWA 离线应用外壳与前台自动同步
@@ -41,7 +42,7 @@ CloudBase PostgreSQL
 - 后端：腾讯云 CloudBase HTTP 云函数
 - 数据：CloudBase PostgreSQL + Document 扩展
 - 托管：CloudBase 静态网站托管
-- 通知：可选 ntfy 服务
+- 通知：ntfy + Bark 双通道
 - 清理：CloudBase 定时云函数
 
 详细模块、权限和数据边界见 [架构说明](docs/architecture.md)。
@@ -81,10 +82,29 @@ npm run deploy:web
 | `VITE_DORMSYNC_API_URL` | 前端访问的 HTTPS API 网关地址 | 是 |
 | `DORMSYNC_CREATOR_KEY` | 创建宿舍时的授权密钥 | 是 |
 | `DORMSYNC_ADMIN_KEY` | 本地只读管理站密钥 | 是 |
+| `DORMSYNC_BARK_ENCRYPTION_KEY` | AES-256-GCM 加密 Bark Key，必须为 64 位十六进制 | 是 |
 | `DORMSYNC_NTFY_SERVER` | 云函数使用的 ntfy 服务地址 | 否 |
 | `DORMSYNC_NTFY_PUBLIC_URL` | 设置页展示和深链使用的公开 ntfy 地址 | 否 |
 
 `.env.local` 已被 Git 忽略，不应提交。仓库中的 `.env.example` 只有占位值。
+
+生成 Bark 加密密钥：
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+该密钥需要长期保留。更换密钥后，已保存的 Bark Key 无法解密，成员需要重新登记设备。
+
+## 通知通道
+
+- ntfy 支持 Android、iPhone、iPad 和桌面设备，所有平台都可以订阅共享 Topic。
+- Bark 仅支持 iPhone/iPad，是 iOS 的可选通知通道；用户可以只选一种或同时开启。
+- 每个成员最多登记 5 台 Bark 设备。
+- 登记时会先发送测试通知，成功后才加密保存。
+- 完整的 Bark Key 不会返回页面，只显示末 4 位。
+- 状态变化会同时发送到 ntfy 和宿舍内全部有效 Bark 设备，两种通道互不排斥。
+- ntfy 或 Bark 任一通道失败都不会回滚已经保存的宿舍状态。
 
 ## 本地开发
 
@@ -115,16 +135,20 @@ npm run dev:test
 
 测试环境使用内存数据库和本地通知收件箱，不连接正式 CloudBase。Windows 完成依赖安装和 `.env.local` 配置后，也可以双击 `启动本地工具.bat`。
 
+六账号测试版会同时输出本机和局域网地址。手机与电脑连接同一 Wi-Fi 后，直接打开终端显示的 `Phone test app` 地址即可测试手机布局和账号切换。Bark 和 ntfy 请求仍由本地收件箱模拟，不会调用真实推送服务。
+
 ## 安全与隐私
 
 - 浏览器不直接访问数据库，只通过 HTTPS 调用云函数
 - 数据库保存设备令牌、绑定码和恢复码的哈希，不保存明文
 - 创建密钥和管理密钥只通过云函数环境变量注入
+- Bark Device Key 使用 AES-256-GCM 加密保存，数据库不保存明文
 - 未登录接口带时间窗尝试限流
 - 仓库不包含成员令牌、恢复码、真实邀请码或生产密钥
 - 应用不采集定位、通讯录、麦克风或摄像头
 - ntfy Topic 是共享秘密而不是强访问控制；知道 Topic 的人可以订阅、读取或伪造消息
 - 启用通知后，昵称、状态、留言和预计时间会发送到部署者选择的 ntfy 服务
+- Bark Device Key 可以被用来向对应设备推送消息，应按推送凭证保护
 
 安全问题请按 [安全政策](SECURITY.md) 私密报告，不要发布到公开 Issue。
 

@@ -16,20 +16,24 @@ interface TestAccount {
   memberId: string
   nickname: string
   memberToken: string
+  recoveryCode?: string
 }
 
 interface NotificationMessage {
   id: number
+  channel?: 'ntfy' | 'bark'
   title: string
   priority: string
   body: string
   receivedAt: string
+  deviceCount?: number
 }
 
 const enabled =
   import.meta.env.DEV && import.meta.env.VITE_LOCAL_TEST_MODE === 'true'
 const storageKey = 'dormsync:local-test-accounts:v1'
 const tokenKey = 'dormsync:member-token:v1'
+const recoveryKey = 'dormsync:local-test-recovery-code:v1'
 
 const open = ref(false)
 const loading = ref(false)
@@ -100,6 +104,9 @@ async function initialize(): Promise<void> {
     const nextAccounts = result.accounts as TestAccount[]
     localStorage.setItem(storageKey, JSON.stringify(nextAccounts))
     localStorage.setItem(tokenKey, nextAccounts[0].memberToken)
+    if (nextAccounts[0].recoveryCode) {
+      localStorage.setItem(recoveryKey, nextAccounts[0].recoveryCode)
+    }
     window.location.reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '初始化失败'
@@ -116,6 +123,7 @@ async function reset(): Promise<void> {
     await testAction('__testResetAll')
     localStorage.removeItem(storageKey)
     localStorage.removeItem(tokenKey)
+    localStorage.removeItem(recoveryKey)
     window.location.reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '重置失败'
@@ -218,7 +226,10 @@ watch(open, (isOpen) => {
           <article v-for="message in inbox" :key="message.id">
             <div>
               <strong>{{ message.title }}</strong>
-              <span>Priority {{ message.priority }}</span>
+              <span v-if="message.channel === 'bark'">
+                Bark · {{ message.priority }} · {{ message.deviceCount }} 台
+              </span>
+              <span v-else>ntfy · Priority {{ message.priority }}</span>
             </div>
             <pre>{{ message.body }}</pre>
             <time :datetime="message.receivedAt">{{ formatInboxTime(message.receivedAt) }}</time>

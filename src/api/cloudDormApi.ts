@@ -1,5 +1,7 @@
 import { DORMSYNC_API_URL } from '../config/cloudbase'
 import type {
+  BarkDevice,
+  BarkDeviceListResult,
   DeviceLinkResult,
   DeviceListResult,
   DormState,
@@ -223,6 +225,36 @@ export const cloudDormApi = {
   sendTestNotification(memberToken: string) {
     return callApi<{ sent: true; sentAt: string }>('sendTestNotification', {
       memberToken,
+    })
+  },
+
+  listBarkDevices(memberToken: string) {
+    return callApi<BarkDeviceListResult>('listBarkDevices', {
+      memberToken,
+    })
+  },
+
+  registerBarkDevice(
+    memberToken: string,
+    input: { deviceKey: string; deviceLabel: string },
+  ) {
+    return callApi<{ device: BarkDevice; configured: true }>('registerBarkDevice', {
+      memberToken,
+      ...input,
+    })
+  },
+
+  testBarkNotification(memberToken: string, deviceId: string) {
+    return callApi<{ sent: true; sentAt: string }>('testBarkNotification', {
+      memberToken,
+      deviceId,
+    })
+  },
+
+  removeBarkDevice(memberToken: string, deviceId: string) {
+    return callApi<{ removed: true }>('removeBarkDevice', {
+      memberToken,
+      deviceId,
     })
   },
 }

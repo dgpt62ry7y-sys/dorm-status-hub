@@ -23,6 +23,7 @@ export interface SecretDialogState {
 
 const TOKEN_KEY = 'dormsync:member-token:v1'
 const NOTIFICATION_TOPIC_SEEN_KEY = 'dormsync:notification-topic-seen:v1'
+const LOCAL_RECOVERY_CODE_KEY = 'dormsync:local-test-recovery-code:v1'
 const POLL_INTERVAL_MS = 5000
 
 function createEmptyState(): DormState {
@@ -277,6 +278,11 @@ async function initialize(): Promise<void> {
     phase.value = 'ready'
     isOnline.value = true
     startPolling()
+    const pendingRecoveryCode = localStorage.getItem(LOCAL_RECOVERY_CODE_KEY)
+    if (pendingRecoveryCode) {
+      localStorage.removeItem(LOCAL_RECOVERY_CODE_KEY)
+      showRecoveryCode(pendingRecoveryCode, true)
+    }
   } catch (error) {
     if (error instanceof CloudApiError && error.code === 'AUTH_REQUIRED') {
       clearSession()
@@ -493,6 +499,25 @@ async function sendTestNotification() {
   return cloudDormApi.sendTestNotification(memberToken.value)
 }
 
+async function listBarkDevices() {
+  return cloudDormApi.listBarkDevices(memberToken.value)
+}
+
+async function registerBarkDevice(deviceKey: string, deviceLabel: string) {
+  return cloudDormApi.registerBarkDevice(memberToken.value, {
+    deviceKey,
+    deviceLabel,
+  })
+}
+
+async function testBarkNotification(deviceId: string) {
+  return cloudDormApi.testBarkNotification(memberToken.value, deviceId)
+}
+
+async function removeBarkDevice(deviceId: string) {
+  return cloudDormApi.removeBarkDevice(memberToken.value, deviceId)
+}
+
 function markNotificationTopicSeen(): void {
   const updatedAt = state.room.notificationTopicUpdatedAt
   if (updatedAt) {
@@ -592,6 +617,10 @@ export function useDormStore() {
     getNotificationSettings,
     rotateNotificationTopic,
     sendTestNotification,
+    listBarkDevices,
+    registerBarkDevice,
+    testBarkNotification,
+    removeBarkDevice,
     markNotificationTopicSeen,
     dismissSecretDialog,
     confirmSecretDialog,

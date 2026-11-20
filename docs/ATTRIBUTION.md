@@ -93,7 +93,7 @@ MIT License 授权的是代码，不自动授予 DormSync 名称、Logo、图标
 
 ### 外部服务
 
-ntfy 和腾讯云 CloudBase 是部署者可选择使用的外部服务。其服务条款、隐私规则、可用性和费用不由本仓库的 MIT License 覆盖。
+ntfy、Bark（`https://api.day.app`）和腾讯云 CloudBase 是部署者可选择使用的外部服务。其服务条款、隐私规则、可用性和费用不由本仓库的 MIT License 覆盖。
 
 ## 需要维护者确认
 

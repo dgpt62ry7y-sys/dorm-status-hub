@@ -99,6 +99,21 @@ export interface NotificationSettings {
   installUrl: string
 }
 
+export interface BarkDevice {
+  id: string
+  label: string
+  maskedKey: string
+  createdAt: string
+  updatedAt: string
+  lastSuccessAt: string | null
+}
+
+export interface BarkDeviceListResult {
+  devices: BarkDevice[]
+  configured: boolean
+  installUrl: string
+}
+
 export interface RevokeDeviceResult extends DeviceListResult {
   revokedCurrent: boolean
 }

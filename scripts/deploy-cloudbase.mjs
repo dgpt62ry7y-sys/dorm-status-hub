@@ -12,6 +12,7 @@ const envId = env.CLOUDBASE_ENV_ID || env.VITE_CLOUDBASE_ENV_ID
 const apiUrl = env.VITE_DORMSYNC_API_URL
 const creatorKey = env.DORMSYNC_CREATOR_KEY
 const adminKey = env.DORMSYNC_ADMIN_KEY
+const barkEncryptionKey = String(env.DORMSYNC_BARK_ENCRYPTION_KEY || '').trim()
 const ntfyServer = String(env.DORMSYNC_NTFY_SERVER || 'https://ntfy.sh')
   .trim()
   .replace(/\/+$/, '')
@@ -40,6 +41,14 @@ if (
 ) {
   throw new Error(
     'DORMSYNC_CREATOR_KEY and DORMSYNC_ADMIN_KEY must be configured in .env.local before deploying the API.',
+  )
+}
+if (
+  target === 'api' &&
+  !/^[0-9a-f]{64}$/i.test(barkEncryptionKey)
+) {
+  throw new Error(
+    'DORMSYNC_BARK_ENCRYPTION_KEY must be exactly 64 hexadecimal characters.',
   )
 }
 if (
@@ -130,6 +139,7 @@ if (dryRun) {
             ? [
                 'DORMSYNC_CREATOR_KEY',
                 'DORMSYNC_ADMIN_KEY',
+                'DORMSYNC_BARK_ENCRYPTION_KEY',
                 'DORMSYNC_NTFY_SERVER',
                 'DORMSYNC_NTFY_PUBLIC_URL',
               ]
@@ -156,6 +166,7 @@ if (target === 'api') {
     ...(httpFunction.envVariables || {}),
     DORMSYNC_CREATOR_KEY: creatorKey,
     DORMSYNC_ADMIN_KEY: adminKey,
+    DORMSYNC_BARK_ENCRYPTION_KEY: barkEncryptionKey,
     DORMSYNC_NTFY_SERVER: ntfyServer,
     DORMSYNC_NTFY_PUBLIC_URL: ntfyPublicUrl,
   }

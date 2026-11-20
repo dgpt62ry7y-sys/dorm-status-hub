@@ -31,6 +31,7 @@
 - 共享睡觉、正常活动、专注学习和外出状态。
 - 设置状态留言、预计结束时间或回寝时间。
 - 为宿舍设置共享 ntfy 通知频道，在室友改状态时接收手机提醒。
+- 为 iPhone/iPad 登记 Bark Device Key，接收同一份宿舍通知。
 - 将同一个成员账号绑定到手机和电脑。
 - 使用账号恢复码、设备管理、容量调整和版本更新公告。
 
@@ -41,7 +42,8 @@
 1. `Vue 3` 前端，构建后部署到 CloudBase 静态网站托管。
 2. `dormsyncHttp` 云函数，处理成员、状态、邀请和设备身份。
 3. CloudBase PostgreSQL 的 Document 扩展，用于保存宿舍业务数据。
-4. 可选的 ntfy 服务，用于转发宿舍通知；默认使用公共 `https://ntfy.sh`。
+4. 可选的 ntfy 服务，支持 Android、iPhone、iPad 和桌面设备。
+5. Bark 官方服务，作为 iPhone/iPad 的可选第二条通道。
 
 浏览器不会直接连接数据库。前端只通过 HTTPS 调用你自己的 `dormsyncHttp` HTTP API。
 
@@ -122,6 +124,7 @@ VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://your-api-domain/dormsyncApi
 DORMSYNC_CREATOR_KEY=你的寝室创建密钥
 DORMSYNC_ADMIN_KEY=你的本地管理密钥
+DORMSYNC_BARK_ENCRYPTION_KEY=你的64位十六进制Bark加密密钥
 DORMSYNC_NTFY_SERVER=https://ntfy.sh
 DORMSYNC_NTFY_PUBLIC_URL=https://ntfy.sh
 ```
@@ -166,6 +169,7 @@ VITE_CLOUDBASE_ENV_ID=你的CloudBase环境ID
 VITE_DORMSYNC_API_URL=https://你的网关地址/dormsyncApi
 DORMSYNC_CREATOR_KEY=你的寝室创建密钥
 DORMSYNC_ADMIN_KEY=你的本地管理密钥
+DORMSYNC_BARK_ENCRYPTION_KEY=你的64位十六进制Bark加密密钥
 DORMSYNC_NTFY_SERVER=https://ntfy.sh
 DORMSYNC_NTFY_PUBLIC_URL=https://ntfy.sh
 ```
@@ -211,6 +215,7 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - `releaseClaims`
 - `securityAttempts`
 - `systemSettings`
+- `pushSubscriptions`
 
 这只会初始化项目内的集合，不会替你创建 CloudBase 环境、PostgreSQL 实例或 Document 扩展。
 
@@ -230,6 +235,9 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - [ ] 到期状态会恢复正常并清空旧留言。
 - [ ] 设置页可以读取宿舍 ntfy Topic，房主可以发送测试通知。
 - [ ] 修改状态后，订阅同一 Topic 的设备能收到 Priority 4 通知。
+- [ ] iPhone/iPad 可以登记 Bark Device Key，并先收到测试通知。
+- [ ] 修改状态后，宿舍内有效 Bark 设备能收到相同通知。
+- [ ] 同一位 iPhone 用户可以只使用 ntfy、只使用 Bark，或同时使用两种通道。
 - [ ] 首次调用 API 后数据库集合已创建。
 - [ ] 定时清理云函数 `dormsyncCleanup` 已创建。
 - [ ] CloudBase 账单归属于你自己的账号和环境。
@@ -262,6 +270,9 @@ npm run dev:test
 - 可以重置全部虚拟数据。
 - 测试面板中的通知收件箱会显示标题、Priority、正文和时间。
 - 收件箱请求只发送到本机测试服务，不会访问真实 `ntfy.sh`。
+- 本地测试服务也会拦截 Bark 批量请求，不调用真实 `api.day.app`。
+- 终端会输出 `Phone test app` 局域网地址；手机与电脑在同一 Wi-Fi 时可以直接打开。
+- 手机通过 Vite 同源代理访问本地测试 API，不需要把 API 端口暴露到局域网。
 
 也可以在 Windows 双击 `启动本地工具.bat`，选择“启动六账号测试版”。启动器会检查 Node.js、项目依赖和 `.env.local`，但不会自动重复安装依赖。
 
@@ -285,6 +296,8 @@ npm run deploy
 5. 使用同一个环境 ID 部署静态网站。
 
 `dormsyncHttp` 与 `dormsyncCleanup` 会同时部署。创建密钥和管理密钥只通过部署时生成的临时配置写入 `dormsyncHttp` 环境变量，不会写入 `cloudbaserc.json`。
+
+部署脚本会校验 `DORMSYNC_BARK_ENCRYPTION_KEY` 是否为 64 位十六进制，并把它写入 `dormsyncHttp` 环境变量。该密钥必须长期保留；更换后，已有 Bark 设备需要重新登记。
 
 如果配置了 `DORMSYNC_NTFY_SERVER` 和 `DORMSYNC_NTFY_PUBLIC_URL`，部署脚本也会把这两个值写入 `dormsyncHttp` 环境变量。生产环境应使用云函数可以访问、手机也能访问的 HTTP 或 HTTPS 地址。
 
@@ -368,15 +381,18 @@ CloudBase 默认测试域名首次访问时可能出现一次安全确认。具�
 - 账号恢复码
 - 设备绑定码
 - 用户宿舍的 ntfy Topic
+- Bark Device Key 或 Bark 加密密钥
 
 前端只需要环境 ID 和公开 HTTP API 地址。
 
 ## 宿舍通知的第三方边界
 
 - 默认通知服务是公共 `https://ntfy.sh`，不是本项目自建或托管的服务。
+- iPhone/iPad 可以选择 ntfy，也可以额外使用 Bark 官方服务 `https://api.day.app`。
 - 每个宿舍的 Topic 由服务端随机生成，但 Topic 本身相当于共享秘密。
 - 知道 Topic 的人可以订阅、读取或伪造消息，不能把它当成强访问控制。
 - 昵称、留言、预计时间和安静人数会发送到部署者选择的 ntfy 服务。
+- Bark Device Key 使用 AES-256-GCM 加密保存，发送时仅在内存中短暂解密。
 - 通知可能因手机后台限制、省电模式、网络或 ntfy 服务状态而延迟或失败。
 - 通知失败不会撤销已经保存的宿舍状态。
 - 如需更严格的数据边界，应自行部署并保护 ntfy 服务。

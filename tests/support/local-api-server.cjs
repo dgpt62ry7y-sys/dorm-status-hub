@@ -28,6 +28,43 @@ process.env.DORMSYNC_ADMIN_KEY ||= 'test-admin-key'
 const database = createMemoryDatabase()
 let notificationInbox = []
 let notificationSequence = 0
+const nativeFetch = global.fetch.bind(global)
+global.fetch = async (url, options = {}) => {
+  if (String(url) === 'https://api.day.app/push') {
+    let payload = {}
+    try {
+      payload = JSON.parse(String(options.body || '{}'))
+    } catch {
+      // The real Bark service rejects malformed JSON.
+    }
+    const deviceKeys = Array.isArray(payload.device_keys) ? payload.device_keys : []
+    notificationSequence += 1
+    notificationInbox.unshift({
+      id: notificationSequence,
+      channel: 'bark',
+      title: String(payload.title || ''),
+      priority: String(payload.level || ''),
+      body: String(payload.body || ''),
+      receivedAt: new Date().toISOString(),
+      deviceCount: deviceKeys.length,
+    })
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: 200,
+          message: 'success',
+          data: deviceKeys.map(() => ({ code: 200 })),
+        }
+      },
+      async text() {
+        return '{"code":200,"message":"success"}'
+      },
+    }
+  }
+  return nativeFetch(url, options)
+}
 const restoreCloudBase = installCloudBaseMock(database)
 const backend = require(path.join(__dirname, '..', '..', 'cloudfunctions', 'api', 'index.js'))
 restoreCloudBase()
@@ -101,6 +138,7 @@ const server = http.createServer(async (request, response) => {
     notificationSequence += 1
     notificationInbox.unshift({
       id: notificationSequence,
+      channel: 'ntfy',
       title,
       priority: String(request.headers.priority || ''),
       body,
@@ -193,6 +231,7 @@ const server = http.createServer(async (request, response) => {
           memberId: created.state.currentMemberId,
           nickname: '测试成员 1',
           memberToken: created.memberToken,
+          recoveryCode: created.recoveryCode,
         },
       ]
       for (let index = 2; index <= 6; index += 1) {
@@ -206,7 +245,29 @@ const server = http.createServer(async (request, response) => {
           memberId: joined.state.currentMemberId,
           nickname: `测试成员 ${index}`,
           memberToken: joined.memberToken,
+          recoveryCode: joined.recoveryCode,
         })
+      }
+      for (const account of accounts) {
+        const tokenHash = crypto
+          .createHash('sha256')
+          .update(account.memberToken)
+          .digest('hex')
+        const session = database.data
+          .get('deviceSessions')
+          .find((item) => item.tokenHash === tokenHash && item.active)
+        const member = session
+          ? database.data.get('members').find((item) => item._id === session.memberId)
+          : null
+        if (member) {
+          member.lastSeenReleaseVersion = '0.0.0'
+          const claims = database.data.get('releaseClaims')
+          for (let claimIndex = claims.length - 1; claimIndex >= 0; claimIndex -= 1) {
+            if (claims[claimIndex].memberId === member._id) {
+              claims.splice(claimIndex, 1)
+            }
+          }
+        }
       }
       sendJson(response, {
         ok: true,

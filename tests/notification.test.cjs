@@ -314,7 +314,7 @@ async function run() {
     'notification failure status save',
   )
   assert(
-    failedState.notificationWarning === '状态已保存，但宿舍通知发送失败',
+    failedState.notificationWarning === '状态已保存，但部分宿舍通知发送失败',
     'Notification failure warning is missing',
   )
   notificationRequestOk = true

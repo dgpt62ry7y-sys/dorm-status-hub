@@ -23,8 +23,17 @@ const NTFY_DEFAULT_SERVER = 'https://ntfy.sh'
 const NTFY_TOPIC_PREFIX = 'dormsync-'
 const NTFY_TIMEOUT_MS = 3_000
 const NTFY_TEST_COOLDOWN_MS = 60_000
+const BARK_API_URL = 'https://api.day.app/push'
+const BARK_APP_STORE_URL = 'https://apps.apple.com/app/id1403753865'
+const BARK_TIMEOUT_MS = 4_000
+const BARK_TEST_COOLDOWN_MS = 60_000
+const MAX_BARK_DEVICES_PER_MEMBER = 5
+const BARK_ENCRYPTION_KEY_ENV = 'DORMSYNC_BARK_ENCRYPTION_KEY'
+const BARK_ENCRYPTION_VERSION = 'v1'
+const BARK_ENCRYPTION_AAD = 'dormsync:bark-subscription:v1'
 const NOTIFICATION_TITLE = 'DormSync · 宿舍状态更新'
 const NOTIFICATION_TEST_TITLE = 'DormSync · 宿舍通知测试'
+const BARK_NOTIFICATION_TEST_TITLE = 'DormSync · Bark 通知测试'
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
 const TIMED_STATUSES = new Set(['sleep', 'focus', 'away'])
 const REQUIRED_TIME_STATUSES = new Set(['sleep', 'away'])
@@ -39,6 +48,7 @@ const COLLECTIONS = [
   'releaseClaims',
   'securityAttempts',
   'systemSettings',
+  'pushSubscriptions',
 ]
 const CURRENT_RELEASE_VERSION = releases.at(-1).version
 
@@ -118,6 +128,10 @@ function deviceLabel(value) {
   return cleanText(value, 40) || '浏览器设备'
 }
 
+function isLocalTestMode() {
+  return process.env.DORMSYNC_LOCAL_TEST_MODE === 'true'
+}
+
 const NTFY_STATUS_LABELS = {
   sleep: '睡觉中',
   normal: '正常活动',
@@ -171,6 +185,102 @@ function validNtfyTopic(topic) {
 
 function encodeNtfyHeader(value) {
   return `=?UTF-8?B?${Buffer.from(String(value), 'utf8').toString('base64')}?=`
+}
+
+function parseBarkDeviceKey(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > 500) return null
+
+  let key = raw
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw)
+      if (
+        url.protocol !== 'https:' ||
+        url.hostname !== 'api.day.app' ||
+        url.port ||
+        url.username ||
+        url.password
+      ) {
+        return null
+      }
+      const segments = url.pathname.split('/').filter(Boolean)
+      if (segments.length === 0 || segments[0] === 'push') return null
+      key = decodeURIComponent(segments[0])
+    } catch {
+      return null
+    }
+  }
+
+  return /^[A-Za-z0-9_-]{16,64}$/.test(key) ? key : null
+}
+
+function barkEncryptionKey() {
+  const value = String(process.env[BARK_ENCRYPTION_KEY_ENV] || '').trim()
+  return /^[0-9a-f]{64}$/i.test(value) ? Buffer.from(value, 'hex') : null
+}
+
+function encryptBarkDeviceKey(key) {
+  const masterKey = barkEncryptionKey()
+  if (!masterKey) return null
+
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, iv)
+  cipher.setAAD(Buffer.from(BARK_ENCRYPTION_AAD, 'utf8'))
+  const ciphertext = Buffer.concat([cipher.update(key, 'utf8'), cipher.final()])
+  const authTag = cipher.getAuthTag()
+  return [
+    BARK_ENCRYPTION_VERSION,
+    iv.toString('base64url'),
+    authTag.toString('base64url'),
+    ciphertext.toString('base64url'),
+  ].join('.')
+}
+
+function decryptBarkDeviceKey(value) {
+  const masterKey = barkEncryptionKey()
+  if (!masterKey || typeof value !== 'string') return null
+
+  const [version, ivValue, tagValue, ciphertextValue] = value.split('.')
+  if (
+    version !== BARK_ENCRYPTION_VERSION ||
+    !ivValue ||
+    !tagValue ||
+    !ciphertextValue
+  ) {
+    return null
+  }
+
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      masterKey,
+      Buffer.from(ivValue, 'base64url'),
+    )
+    decipher.setAAD(Buffer.from(BARK_ENCRYPTION_AAD, 'utf8'))
+    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'))
+    return Buffer.concat([
+      decipher.update(Buffer.from(ciphertextValue, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8')
+  } catch {
+    return null
+  }
+}
+
+function barkDeviceView(subscription) {
+  return {
+    id: subscription._id,
+    label: subscription.deviceLabel || 'Bark 设备',
+    maskedKey: `••••${subscription.keySuffix || ''}`,
+    createdAt: subscription.createdAt,
+    updatedAt: subscription.updatedAt,
+    lastSuccessAt: subscription.lastSuccessAt || null,
+  }
+}
+
+function barkDeviceLabel(value) {
+  return cleanText(value, 30).replace(/[\r\n\t]+/g, ' ') || 'Bark 设备'
 }
 
 function beijingDateParts(value) {
@@ -286,6 +396,182 @@ async function publishNtfyMessage(topic, title, body) {
     return { ok: false }
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+async function publishBarkMessage(deviceKeys, title, body) {
+  const keys = [...new Set(deviceKeys.filter(Boolean))]
+  if (keys.length === 0) {
+    return { ok: true, attempted: 0, successCount: 0, failureCount: 0, outcomes: [] }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), BARK_TIMEOUT_MS)
+  try {
+    const response = await fetch(BARK_API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({
+        title,
+        body,
+        device_keys: keys,
+        level: 'active',
+        group: 'DormSync',
+      }),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      console.error('bark publish failed', { status: response.status })
+      return {
+        ok: false,
+        attempted: keys.length,
+        successCount: 0,
+        failureCount: keys.length,
+        outcomes: keys.map(() => false),
+      }
+    }
+
+    let payload
+    try {
+      payload = await response.json()
+    } catch {
+      console.error('bark publish failed', { code: 'INVALID_RESPONSE' })
+      return {
+        ok: false,
+        attempted: keys.length,
+        successCount: 0,
+        failureCount: keys.length,
+        outcomes: keys.map(() => false),
+      }
+    }
+
+    if (Array.isArray(payload?.data)) {
+      const outcomes = keys.map((_, index) => payload.data[index]?.code === 200)
+      const successCount = outcomes.filter(Boolean).length
+      const failureCount = outcomes.length - successCount
+      if (failureCount > 0) {
+        console.error('bark publish partially failed', { failureCount })
+      }
+      return {
+        ok: failureCount === 0,
+        attempted: keys.length,
+        successCount,
+        failureCount,
+        outcomes,
+      }
+    }
+
+    if (Number(payload?.code) === 200) {
+      return {
+        ok: true,
+        attempted: keys.length,
+        successCount: keys.length,
+        failureCount: 0,
+        outcomes: keys.map(() => true),
+      }
+    }
+
+    console.error('bark publish failed', { code: 'REJECTED' })
+    return {
+      ok: false,
+      attempted: keys.length,
+      successCount: 0,
+      failureCount: keys.length,
+      outcomes: keys.map(() => false),
+    }
+  } catch (error) {
+    console.error('bark publish failed', {
+      code: error?.cause?.code || error?.name || 'UNKNOWN',
+    })
+    return {
+      ok: false,
+      attempted: keys.length,
+      successCount: 0,
+      failureCount: keys.length,
+      outcomes: keys.map(() => false),
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function getActiveBarkSubscriptions(roomId) {
+  const result = await db
+    .collection('pushSubscriptions')
+    .where({ roomId, provider: 'bark', active: true })
+    .limit(MAX_ROOM_CAPACITY * MAX_BARK_DEVICES_PER_MEMBER)
+    .get()
+  return result.data
+}
+
+async function sendBarkRoomNotification(roomId, title, body) {
+  const subscriptions = await getActiveBarkSubscriptions(roomId)
+  if (subscriptions.length === 0) {
+    return { ok: true, attempted: 0, successCount: 0, failureCount: 0 }
+  }
+
+  const unique = new Map()
+  for (const subscription of subscriptions) {
+    if (!unique.has(subscription.keyFingerprint)) {
+      unique.set(subscription.keyFingerprint, subscription)
+    }
+  }
+
+  const prepared = []
+  for (const subscription of unique.values()) {
+    const key = decryptBarkDeviceKey(subscription.encryptedKey)
+    if (key) prepared.push({ subscription, key })
+  }
+
+  const decryptFailures = unique.size - prepared.length
+  const result = await publishBarkMessage(
+    prepared.map((item) => item.key),
+    title,
+    body,
+  )
+  const successfulAt = nowIso()
+  await Promise.all(
+    prepared.map(async (item, index) => {
+      if (!result.outcomes[index]) return
+      await db.collection('pushSubscriptions').doc(item.subscription._id).update({
+        lastSuccessAt: successfulAt,
+        updatedAt: successfulAt,
+      })
+    }),
+  )
+
+  return {
+    ok: result.ok && decryptFailures === 0,
+    attempted: subscriptions.length,
+    successCount: result.successCount,
+    failureCount: result.failureCount + decryptFailures,
+  }
+}
+
+async function sendRoomNotification(room, title, body) {
+  try {
+    const [ntfyResult, barkResult] = await Promise.all([
+      validNtfyTopic(room.ntfyTopic)
+        ? publishNtfyMessage(room.ntfyTopic, title, body)
+        : Promise.resolve({ ok: true, attempted: 0 }),
+      sendBarkRoomNotification(room._id, title, body),
+    ])
+    return {
+      ok: ntfyResult.ok && barkResult.ok,
+      ntfy: ntfyResult,
+      bark: barkResult,
+    }
+  } catch (error) {
+    console.error('notification fanout failed', {
+      code: error?.code || error?.cause?.code || error?.name || 'UNKNOWN',
+    })
+    return {
+      ok: false,
+      ntfy: { ok: false },
+      bark: { ok: false },
+    }
   }
 }
 
@@ -1244,6 +1530,162 @@ function notificationSettingsPayload(room, member) {
   }
 }
 
+async function consumeBarkTestCooldown(member) {
+  if (isLocalTestMode()) return true
+  const lastSentAt = Date.parse(member.lastBarkTestAt || '')
+  if (Number.isFinite(lastSentAt) && Date.now() - lastSentAt < BARK_TEST_COOLDOWN_MS) {
+    return false
+  }
+  const sentAt = nowIso()
+  await db.collection('members').doc(member._id).update({
+    lastBarkTestAt: sentAt,
+  })
+  member.lastBarkTestAt = sentAt
+  return true
+}
+
+async function handleListBarkDevices(member) {
+  const result = await db
+    .collection('pushSubscriptions')
+    .where({ roomId: member.roomId, memberId: member._id, provider: 'bark', active: true })
+    .limit(MAX_BARK_DEVICES_PER_MEMBER)
+    .get()
+  const devices = result.data
+    .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+    .map(barkDeviceView)
+  return ok({
+    devices,
+    configured: Boolean(barkEncryptionKey()),
+    installUrl: BARK_APP_STORE_URL,
+  })
+}
+
+async function handleRegisterBarkDevice(event, member) {
+  const key = parseBarkDeviceKey(event.deviceKey)
+  if (!key) {
+    return fail(
+      'INVALID_BARK_KEY',
+      'Bark Key 无效，请输入 Device Key 或 api.day.app 测试链接',
+    )
+  }
+  if (!barkEncryptionKey()) {
+    return fail('BARK_NOT_CONFIGURED', 'Bark 通知尚未完成服务端配置')
+  }
+
+  const fingerprint = hashToken(`bark-device:${key}`)
+  const subscriptionId = hashToken(`bark-subscription:${member._id}:${fingerprint}`)
+  const existing = await getDocument('pushSubscriptions', subscriptionId)
+  if (!existing) {
+    const current = await db
+      .collection('pushSubscriptions')
+      .where({ memberId: member._id, provider: 'bark', active: true })
+      .limit(MAX_BARK_DEVICES_PER_MEMBER + 1)
+      .get()
+    if (current.data.length >= MAX_BARK_DEVICES_PER_MEMBER) {
+      return fail('BARK_DEVICE_LIMIT', '每个账号最多登记 5 台 Bark 设备')
+    }
+  }
+
+  if (!(await consumeBarkTestCooldown(member))) {
+    return fail('NOTIFICATION_RATE_LIMITED', 'Bark 测试通知一分钟只能发送一次')
+  }
+
+  const encryptedKey = encryptBarkDeviceKey(key)
+  if (!encryptedKey) {
+    return fail('BARK_NOT_CONFIGURED', 'Bark 通知尚未完成服务端配置')
+  }
+  const deviceLabel = barkDeviceLabel(event.deviceLabel)
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+
+  const tested = await publishBarkMessage(
+    [key],
+    BARK_NOTIFICATION_TEST_TITLE,
+    [
+      'Bark 已连接成功。',
+      `宿舍：${room.name}`,
+      `登记设备：${deviceLabel}`,
+    ].join('\n'),
+  )
+  if (!tested.ok) {
+    return fail('BARK_TEST_FAILED', 'Bark 测试通知发送失败，请检查 Key 后重试')
+  }
+
+  const timestamp = nowIso()
+  const subscription = {
+    roomId: member.roomId,
+    memberId: member._id,
+    provider: 'bark',
+    deviceLabel,
+    keyFingerprint: fingerprint,
+    keySuffix: key.slice(-4),
+    encryptedKey,
+    active: true,
+    createdAt: existing?.createdAt || timestamp,
+    updatedAt: timestamp,
+    lastSuccessAt: timestamp,
+    lastTestedAt: timestamp,
+  }
+  await db.collection('pushSubscriptions').doc(subscriptionId).set(subscription)
+  return ok({
+    device: barkDeviceView({ _id: subscriptionId, ...subscription }),
+    configured: true,
+  })
+}
+
+async function getOwnedBarkSubscription(member, deviceId) {
+  const subscription = await getDocument('pushSubscriptions', cleanText(deviceId, 100))
+  if (
+    !subscription ||
+    subscription.roomId !== member.roomId ||
+    subscription.memberId !== member._id ||
+    subscription.provider !== 'bark' ||
+    !subscription.active
+  ) {
+    return null
+  }
+  return subscription
+}
+
+async function handleTestBarkNotification(event, member) {
+  const subscription = await getOwnedBarkSubscription(member, event.deviceId)
+  if (!subscription) return fail('BARK_DEVICE_NOT_FOUND', 'Bark 设备不存在')
+  if (!(await consumeBarkTestCooldown(member))) {
+    return fail('NOTIFICATION_RATE_LIMITED', 'Bark 测试通知一分钟只能发送一次')
+  }
+
+  const key = decryptBarkDeviceKey(subscription.encryptedKey)
+  if (!key) return fail('BARK_DEVICE_INVALID', 'Bark 设备需要重新登记')
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+
+  const tested = await publishBarkMessage(
+    [key],
+    BARK_NOTIFICATION_TEST_TITLE,
+    [
+      'Bark 测试通知。',
+      `宿舍：${room.name}`,
+      `设备：${subscription.deviceLabel || 'Bark 设备'}`,
+    ].join('\n'),
+  )
+  if (!tested.ok) return fail('BARK_TEST_FAILED', 'Bark 测试通知发送失败')
+
+  const sentAt = nowIso()
+  await db.collection('pushSubscriptions').doc(subscription._id).update({
+    lastSuccessAt: sentAt,
+    lastTestedAt: sentAt,
+    updatedAt: sentAt,
+  })
+  return ok({ sent: true, sentAt })
+}
+
+async function handleRemoveBarkDevice(event, member) {
+  const subscription = await getOwnedBarkSubscription(member, event.deviceId)
+  if (!subscription) return fail('BARK_DEVICE_NOT_FOUND', 'Bark 设备不存在')
+  await db.collection('pushSubscriptions').doc(subscription._id).delete()
+  return ok({ removed: true })
+}
+
 async function handleGetNotificationSettings(member) {
   let room = await getRoom(member.roomId)
   if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
@@ -1292,7 +1734,11 @@ async function handleSendTestNotification(member) {
     return fail('ONLY_OWNER', '只有房主可以发送测试通知')
   }
   const lastSentAt = Date.parse(room.lastNtfyTestAt || '')
-  if (Number.isFinite(lastSentAt) && Date.now() - lastSentAt < NTFY_TEST_COOLDOWN_MS) {
+  if (
+    !isLocalTestMode() &&
+    Number.isFinite(lastSentAt) &&
+    Date.now() - lastSentAt < NTFY_TEST_COOLDOWN_MS
+  ) {
     return fail('NOTIFICATION_RATE_LIMITED', '测试通知一分钟只能发送一次')
   }
 
@@ -1367,20 +1813,16 @@ async function handleUpdateStatus(event, member, currentDeviceId) {
   if (!state || !changed) return ok(state)
 
   const room = await getRoom(member.roomId)
-  if (!room || !validNtfyTopic(room.ntfyTopic)) return ok(state)
+  if (!room) return ok(state)
 
   const body = buildStatusNotification(member, previousStatus, status, state)
-  const sent = await publishNtfyMessage(
-    room.ntfyTopic,
-    NOTIFICATION_TITLE,
-    body,
-  )
+  const delivery = await sendRoomNotification(room, NOTIFICATION_TITLE, body)
   return ok(
-    sent.ok
+    delivery.ok
       ? state
       : {
           ...state,
-          notificationWarning: '状态已保存，但宿舍通知发送失败',
+          notificationWarning: '状态已保存，但部分宿舍通知发送失败',
         },
   )
 }
@@ -1578,6 +2020,7 @@ async function handleRemoveMember(event, member, currentDeviceId) {
   await Promise.all([
     revokeMemberSessions(targetMemberId),
     revokeMemberDeviceLinks(targetMemberId),
+    deleteCollectionRows('pushSubscriptions', { memberId: targetMemberId }),
   ])
   const statusResult = await db
     .collection('statuses')
@@ -1642,6 +2085,7 @@ async function handleLeaveRoom(member) {
   await Promise.all([
     revokeMemberSessions(member._id),
     revokeMemberDeviceLinks(member._id),
+    deleteCollectionRows('pushSubscriptions', { memberId: member._id }),
   ])
   return ok({ left: true })
 }
@@ -1667,6 +2111,7 @@ async function deleteRoomRecords(room) {
         deleteCollectionRows('deviceSessions', { memberId: member._id }),
         deleteCollectionRows('deviceLinks', { memberId: member._id }),
         deleteCollectionRows('releaseClaims', { memberId: member._id }),
+        deleteCollectionRows('pushSubscriptions', { memberId: member._id }),
       ])
       await db.collection('members').doc(member._id).delete()
     }),
@@ -1678,6 +2123,7 @@ async function deleteRoomRecords(room) {
     deleteCollectionRows('members', { roomId: room._id }),
     deleteCollectionRows('releaseClaims', { roomId: room._id }),
     deleteCollectionRows('systemSettings', { roomId: room._id }),
+    deleteCollectionRows('pushSubscriptions', { roomId: room._id }),
   ])
   await db.collection('rooms').doc(room._id).delete()
 }
@@ -1858,6 +2304,18 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'sendTestNotification') {
       return await handleSendTestNotification(member)
+    }
+    if (event.action === 'listBarkDevices') {
+      return await handleListBarkDevices(member)
+    }
+    if (event.action === 'registerBarkDevice') {
+      return await handleRegisterBarkDevice(event, member)
+    }
+    if (event.action === 'testBarkNotification') {
+      return await handleTestBarkNotification(event, member)
+    }
+    if (event.action === 'removeBarkDevice') {
+      return await handleRemoveBarkDevice(event, member)
     }
     return fail('UNKNOWN_ACTION', '未知操作')
   } catch (error) {

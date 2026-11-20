@@ -3187,10 +3187,6 @@ textarea:focus-visible {
   padding-left: 18px;
 }
 
-.notification-seen {
-  color: #49665b;
-}
-
 .notification-owner-actions {
   padding-top: 16px;
   border-top: 1px solid #e8e8e4;
@@ -3211,6 +3207,219 @@ textarea:focus-visible {
 .notification-security p {
   font-size: 9px;
   line-height: 1.65;
+}
+
+.bark-panel {
+  gap: 18px;
+}
+
+.bark-install {
+  display: flex;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #e4e1d9;
+  border-radius: 12px;
+  background: #faf9f5;
+  color: var(--ink-soft);
+}
+
+.bark-install > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #5d7068;
+}
+
+.bark-install > div {
+  display: grid;
+  gap: 5px;
+}
+
+.bark-install strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.bark-install p {
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.bark-install a {
+  width: max-content;
+  color: #286451;
+  font-size: 9px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bark-form {
+  display: grid;
+  gap: 15px;
+}
+
+.bark-form > .button {
+  width: max-content;
+}
+
+.bark-key-input {
+  position: relative;
+  display: block;
+}
+
+.bark-key-input input {
+  padding-right: 42px;
+}
+
+.bark-key-input button {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.bark-key-input button:hover {
+  background: #efefec;
+  color: var(--ink);
+}
+
+.bark-devices {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid #e8e8e4;
+}
+
+.bark-devices__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bark-devices__heading strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.bark-devices__heading span {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.bark-empty {
+  padding: 14px;
+  border: 1px dashed #ddd9d0;
+  border-radius: 10px;
+  color: var(--ink-faint);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.bark-device-list {
+  display: grid;
+  gap: 8px;
+}
+
+.bark-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid #e7e4dd;
+  border-radius: 11px;
+  background: #fbfaf7;
+}
+
+.bark-device__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.bark-device__identity > span {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #e9efeb;
+  color: #3f6658;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.bark-device__identity > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.bark-device__identity strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bark-device__identity code {
+  color: var(--ink-faint);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+}
+
+.bark-device__meta {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 6px;
+}
+
+.bark-device__meta > small {
+  color: var(--ink-faint);
+  font-size: 8px;
+}
+
+.bark-device__meta > div {
+  display: flex;
+  gap: 5px;
+}
+
+.bark-device__meta button {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #dedbd2;
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.bark-device__meta button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.bark-device__meta .bark-device__remove {
+  color: #a04b3e;
 }
 
 .notification-actions .button,
@@ -4481,6 +4690,25 @@ textarea:focus-visible {
   .notification-owner-actions .button {
     min-width: min(100%, 150px);
     flex: 1 1 150px;
+  }
+
+  .bark-form > .button {
+    width: 100%;
+  }
+
+  .bark-device {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .bark-device__meta {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .bark-device__meta > div {
+    justify-content: flex-end;
   }
 
   .account-actions {
