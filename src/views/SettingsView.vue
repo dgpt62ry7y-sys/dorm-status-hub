@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Check, Info, LogOut, ShieldCheck, UserRound } from 'lucide-vue-next'
+import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
 import StatusIcon from '../components/StatusIcon.vue'
 import { useDormStore } from '../composables/useDormStore'
@@ -78,7 +79,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">宿舍状态共享站 / {{ state.room.name }}</p>
         <h1>设置</h1>
-        <p class="page-intro">管理你的称呼、默认状态和本地演示数据。</p>
+        <p class="page-intro">管理称呼、默认状态、账号恢复和登录设备。</p>
       </div>
       <span class="profile-chip">
         <UserRound :size="17" stroke-width="1.8" aria-hidden="true" />
@@ -87,56 +88,60 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="settings-layout">
-      <section class="settings-section" aria-labelledby="profile-heading">
-        <div class="settings-section__heading">
-          <h2 id="profile-heading">个人信息</h2>
-        </div>
-
-        <label class="field">
-          <span class="field__label">昵称</span>
-          <input
-            v-model="nickname"
-            type="text"
-            maxlength="12"
-            autocomplete="nickname"
-            placeholder="宿舍里怎么称呼你"
-          />
-          <span class="field__hint">最多 12 个字符，只在当前宿舍中显示。</span>
-        </label>
-
-        <fieldset class="field field--fieldset">
-          <legend class="field__label">默认状态</legend>
-          <div class="settings-status-grid">
-            <button
-              v-for="option in STATUS_OPTIONS"
-              :key="option.value"
-              type="button"
-              class="settings-status"
-              :class="{ 'settings-status--active': defaultStatus === option.value }"
-              :style="{ '--status-tone': option.tone, '--status-soft': option.softTone }"
-              @click="defaultStatus = option.value"
-            >
-              <StatusIcon :status="option.value" :size="17" />
-              {{ option.label }}
-              <Check
-                v-if="defaultStatus === option.value"
-                :size="15"
-                stroke-width="2.2"
-                aria-hidden="true"
-              />
-            </button>
+      <div class="settings-main">
+        <section class="settings-section" aria-labelledby="profile-heading">
+          <div class="settings-section__heading">
+            <h2 id="profile-heading">个人信息</h2>
           </div>
-        </fieldset>
 
-        <button
-          type="button"
-          class="button button--primary"
-          :disabled="saving"
-          @click="handleSaveProfile"
-        >
-          {{ saving ? '正在保存…' : '保存设置' }}
-        </button>
-      </section>
+          <label class="field">
+            <span class="field__label">昵称</span>
+            <input
+              v-model="nickname"
+              type="text"
+              maxlength="12"
+              autocomplete="nickname"
+              placeholder="宿舍里怎么称呼你"
+            />
+            <span class="field__hint">最多 12 个字符，只在当前宿舍中显示。</span>
+          </label>
+
+          <fieldset class="field field--fieldset">
+            <legend class="field__label">默认状态</legend>
+            <div class="settings-status-grid">
+              <button
+                v-for="option in STATUS_OPTIONS"
+                :key="option.value"
+                type="button"
+                class="settings-status"
+                :class="{ 'settings-status--active': defaultStatus === option.value }"
+                :style="{ '--status-tone': option.tone, '--status-soft': option.softTone }"
+                @click="defaultStatus = option.value"
+              >
+                <StatusIcon :status="option.value" :size="17" />
+                {{ option.label }}
+                <Check
+                  v-if="defaultStatus === option.value"
+                  :size="15"
+                  stroke-width="2.2"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+          </fieldset>
+
+          <button
+            type="button"
+            class="button button--primary"
+            :disabled="saving"
+            @click="handleSaveProfile"
+          >
+            {{ saving ? '正在保存…' : '保存设置' }}
+          </button>
+        </section>
+
+        <AccountDevicePanel @notify="showToast" />
+      </div>
 
       <aside class="settings-aside">
         <section class="info-panel" aria-labelledby="demo-heading">
@@ -166,7 +171,7 @@ onBeforeUnmount(() => {
           </div>
           <div>
             <span>版本</span>
-            <strong>1.0.0 长期使用版</strong>
+            <strong>1.1.0 跨设备账号版</strong>
           </div>
         </section>
 

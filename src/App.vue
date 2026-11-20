@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue'
 import { Home, Settings, Users } from 'lucide-vue-next'
 import AccessGate from './components/AccessGate.vue'
+import SecretCodeDialog from './components/SecretCodeDialog.vue'
 import { useDormStore } from './composables/useDormStore'
 
 const navItems = [
@@ -10,7 +11,16 @@ const navItems = [
   { to: '/settings', label: '设置', icon: Settings },
 ]
 
-const { state, phase, isOnline, isSyncing, initialize } = useDormStore()
+const {
+  state,
+  phase,
+  isOnline,
+  isSyncing,
+  secretDialog,
+  initialize,
+  dismissSecretDialog,
+  confirmSecretDialog,
+} = useDormStore()
 const cloudLabel = computed(() => {
   if (phase.value !== 'ready') return 'CloudBase'
   if (!isOnline.value) return '离线'
@@ -72,5 +82,16 @@ onMounted(() => {
         <span>{{ item.label }}</span>
       </RouterLink>
     </nav>
+
+    <SecretCodeDialog
+      v-if="secretDialog"
+      :visible="Boolean(secretDialog)"
+      :title="secretDialog.title"
+      :description="secretDialog.description"
+      :code="secretDialog.code"
+      :required="secretDialog.required"
+      @close="dismissSecretDialog"
+      @confirm="confirmSecretDialog"
+    />
   </div>
 </template>

@@ -27,6 +27,7 @@ export interface DormState {
   members: Member[]
   statuses: StatusRecord[]
   currentMemberId: string
+  currentDeviceId: string
   preferences: {
     defaultStatus: DormStatus
   }
@@ -36,6 +37,28 @@ export interface StatusUpdate {
   status: DormStatus
   note: string
   endAt: string | null
+}
+
+export interface DeviceSession {
+  id: string
+  label: string
+  createdAt: string
+  lastSeenAt: string
+  isCurrent: boolean
+}
+
+export interface DeviceListResult {
+  currentDeviceId: string
+  devices: DeviceSession[]
+}
+
+export interface DeviceLinkResult {
+  code: string
+  expiresAt: string
+}
+
+export interface RevokeDeviceResult extends DeviceListResult {
+  revokedCurrent: boolean
 }
 
 export interface StatusOption {

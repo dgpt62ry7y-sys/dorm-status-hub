@@ -1,5 +1,12 @@
 import { DORMSYNC_API_URL } from '../config/cloudbase'
-import type { DormState, DormStatus, StatusUpdate } from '../types/dorm'
+import type {
+  DeviceLinkResult,
+  DeviceListResult,
+  DormState,
+  DormStatus,
+  RevokeDeviceResult,
+  StatusUpdate,
+} from '../types/dorm'
 
 interface ApiSuccess<T> {
   ok: true
@@ -16,6 +23,7 @@ interface ApiFailure {
 
 export interface SessionResult {
   memberToken: string
+  recoveryCode?: string
   state: DormState
 }
 
@@ -55,12 +63,20 @@ async function callApi<T>(action: string, payload: Record<string, unknown> = {})
 }
 
 export const cloudDormApi = {
-  createRoom(input: { roomName: string; nickname: string }) {
+  createRoom(input: { roomName: string; nickname: string; deviceLabel: string }) {
     return callApi<SessionResult>('createRoom', input)
   },
 
-  joinRoom(input: { inviteCode: string; nickname: string }) {
+  joinRoom(input: { inviteCode: string; nickname: string; deviceLabel: string }) {
     return callApi<SessionResult>('joinRoom', input)
+  },
+
+  claimDeviceLink(input: { code: string; deviceLabel: string }) {
+    return callApi<SessionResult>('claimDeviceLink', input)
+  },
+
+  recoverAccount(input: { recoveryCode: string; deviceLabel: string }) {
+    return callApi<SessionResult>('recoverAccount', input)
   },
 
   getState(memberToken: string) {
@@ -99,5 +115,21 @@ export const cloudDormApi = {
 
   leaveRoom(memberToken: string) {
     return callApi<{ left: true }>('leaveRoom', { memberToken })
+  },
+
+  createDeviceLink(memberToken: string) {
+    return callApi<DeviceLinkResult>('createDeviceLink', { memberToken })
+  },
+
+  listDevices(memberToken: string) {
+    return callApi<DeviceListResult>('listDevices', { memberToken })
+  },
+
+  revokeDevice(memberToken: string, deviceId: string) {
+    return callApi<RevokeDeviceResult>('revokeDevice', { memberToken, deviceId })
+  },
+
+  rotateRecoveryCode(memberToken: string) {
+    return callApi<{ recoveryCode: string }>('rotateRecoveryCode', { memberToken })
   },
 }
