@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "envId": "room433-d3gzju0tf27b2d998",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "dormsyncApi",
+      "dir": "cloudfunctions/api",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 10,
+      "memorySize": 256,
+      "description": "DormSync room, member, status and invite API",
+      "aclRule": {
+        "*": {
+          "invoke": "auth.loginType != 'ANONYMOUS' && auth != null"
+        },
+        "dormsyncApi": {
+          "invoke": "auth != null"
+        }
+      }
+    },
+    {
+      "name": "dormsyncHttp",
+      "dir": "cloudfunctions/api",
+      "type": "HTTP",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 10,
+      "memorySize": 256,
+      "public": true,
+      "gatewayPath": "/dormsyncApi",
+      "description": "DormSync public HTTP API"
+    }
+  ]
+}

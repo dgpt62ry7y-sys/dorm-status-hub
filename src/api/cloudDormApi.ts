@@ -1,0 +1,103 @@
+import { DORMSYNC_API_URL } from '../config/cloudbase'
+import type { DormState, DormStatus, StatusUpdate } from '../types/dorm'
+
+interface ApiSuccess<T> {
+  ok: true
+  data: T
+}
+
+interface ApiFailure {
+  ok: false
+  error: {
+    code: string
+    message: string
+  }
+}
+
+export interface SessionResult {
+  memberToken: string
+  state: DormState
+}
+
+export class CloudApiError extends Error {
+  code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'CloudApiError'
+    this.code = code
+  }
+}
+
+async function callApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+  const response = await fetch(DORMSYNC_API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      action,
+      ...payload,
+    }),
+  })
+
+  const result = (await response.json()) as ApiSuccess<T> | ApiFailure
+  if (!result) {
+    throw new CloudApiError(
+      'EMPTY_RESPONSE',
+      '云端服务没有返回结果',
+    )
+  }
+  if (!result.ok) {
+    throw new CloudApiError(result.error.code, result.error.message)
+  }
+  return result.data
+}
+
+export const cloudDormApi = {
+  createRoom(input: { roomName: string; nickname: string }) {
+    return callApi<SessionResult>('createRoom', input)
+  },
+
+  joinRoom(input: { inviteCode: string; nickname: string }) {
+    return callApi<SessionResult>('joinRoom', input)
+  },
+
+  getState(memberToken: string) {
+    return callApi<DormState>('getState', { memberToken })
+  },
+
+  updateStatus(memberToken: string, update: StatusUpdate) {
+    return callApi<DormState>('updateStatus', {
+      memberToken,
+      ...update,
+    })
+  },
+
+  updateProfile(
+    memberToken: string,
+    input: { nickname: string; defaultStatus: DormStatus },
+  ) {
+    return callApi<DormState>('updateProfile', {
+      memberToken,
+      ...input,
+    })
+  },
+
+  regenerateInvite(memberToken: string) {
+    return callApi<{ inviteCode: string; state: DormState }>('regenerateInvite', {
+      memberToken,
+    })
+  },
+
+  removeMember(memberToken: string, memberId: string) {
+    return callApi<DormState>('removeMember', {
+      memberToken,
+      memberId,
+    })
+  },
+
+  leaveRoom(memberToken: string) {
+    return callApi<{ left: true }>('leaveRoom', { memberToken })
+  },
+}
