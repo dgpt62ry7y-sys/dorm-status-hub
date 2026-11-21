@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-demo*/
+demo-dist/
 .DS_Store
 Thumbs.db
 *.log

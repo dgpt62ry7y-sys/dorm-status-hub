@@ -23,7 +23,8 @@ const FEEDBACK_CONTACT_MAX_LENGTH = 100
 const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['joinRoom', { scope: 'join-room', maxAttempts: 30 }],
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
-  ['recoverAccount', { scope: 'recover-account', maxAttempts: 10 }],
+  ['recoverAccount', { scope: 'recover-account', maxAttempts: 30 }],
+  ['recoverWithAssistance', { scope: 'recover-with-assistance', maxAttempts: 30 }],
 ])
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
@@ -62,6 +63,7 @@ const COLLECTIONS = [
   'pushSubscriptions',
   'joinRequests',
   'temporaryRecoveryCodes',
+  'personalRecoveryCodes',
   'accountRecoveryAudit',
   'feedbackEntries',
 ]
@@ -915,6 +917,10 @@ function temporaryRecoveryDocumentId(code) {
   return hashToken(`temporary-recovery:${normalizeSecret(code)}`)
 }
 
+function personalRecoveryDocumentId(code) {
+  return `pr_${hashToken(`personal-recovery:${normalizeSecret(code)}`).slice(0, 24)}`
+}
+
 async function getTemporaryRecoveryCodeDocument(code) {
   const normalized = normalizeSecret(code)
   const result = await db
@@ -1490,6 +1496,16 @@ async function insertMember(transaction, {
     recoveryCodeUpdatedAt: joinedAt,
   })
   const memberId = insertedId(memberResult)
+  await transaction
+    .collection('personalRecoveryCodes')
+    .doc(personalRecoveryDocumentId(recoveryCode))
+    .set({
+      memberId,
+      roomId,
+      codeHash: hashToken(recoveryCode),
+      active: true,
+      createdAt: joinedAt,
+    })
   const sessionId = await insertDeviceSession(transaction.collection('deviceSessions'), {
     memberId,
     roomId,
@@ -1511,6 +1527,7 @@ async function insertMember(transaction, {
     memberId,
     memberToken,
     recoveryCode,
+    recoveryCodeHash: hashToken(recoveryCode),
     sessionId,
     nickname,
     role,
@@ -1568,6 +1585,9 @@ async function handleCreateRoom(event) {
     })
     await rooms.doc(roomId).update({
       ownerId: member.memberId,
+      recoveryDirectory: {
+        [member.memberId]: member.recoveryCodeHash,
+      },
       updatedAt: nowIso(),
     })
     return { roomId, member }
@@ -1682,6 +1702,13 @@ async function handleJoinRoom(event) {
         memberId: member.memberId,
         deviceInstanceIdHash,
         createdAt: nowIso(),
+      })
+      await transaction.collection('rooms').doc(room._id).update({
+        recoveryDirectory: {
+          ...(room.recoveryDirectory || {}),
+          [member.memberId]: member.recoveryCodeHash,
+        },
+        updatedAt: nowIso(),
       })
       return member
     })
@@ -1863,16 +1890,77 @@ async function handleRecoverAccount(event) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
 
-  const memberResult = await db
-    .collection('members')
-    .where({
-      roomId: room._id,
-      recoveryCodeHash: hashToken(code),
-      active: true,
-    })
-    .limit(1)
-    .get()
-  const member = memberResult.data[0]
+  const codeHash = hashToken(code)
+  let member = null
+  const directRecoveryDocument = await getDocument(
+    'personalRecoveryCodes',
+    personalRecoveryDocumentId(code),
+  )
+  if (
+    directRecoveryDocument?.active &&
+    directRecoveryDocument.roomId === room._id &&
+    directRecoveryDocument.codeHash === codeHash
+  ) {
+    member = await getDocument('members', directRecoveryDocument.memberId)
+    if (
+      !member?.active ||
+      member.roomId !== room._id ||
+      member.recoveryCodeHash !== codeHash
+    ) {
+      member = null
+    }
+  }
+  const directoryMemberId = Object.entries(room.recoveryDirectory || {}).find(
+    ([, hash]) => hash === codeHash,
+  )?.[0]
+  if (!member && directoryMemberId) {
+    member = await getDocument('members', directoryMemberId)
+    if (
+      !member?.active ||
+      member.roomId !== room._id ||
+      member.recoveryCodeHash !== codeHash
+    ) {
+      member = null
+    }
+  }
+  if (!member) {
+    const recoveryResult = await db
+      .collection('personalRecoveryCodes')
+      .where({
+        roomId: room._id,
+        codeHash,
+        active: true,
+      })
+      .limit(1)
+      .get()
+    const recoveryDocument = recoveryResult.data[0] || null
+    if (
+      recoveryDocument?.active &&
+      recoveryDocument.roomId === room._id &&
+      recoveryDocument.codeHash === codeHash
+    ) {
+      member = await getDocument('members', recoveryDocument.memberId)
+      if (
+        !member?.active ||
+        member.roomId !== room._id ||
+        member.recoveryCodeHash !== codeHash
+      ) {
+        member = null
+      }
+    }
+  }
+  if (!member) {
+    const memberResult = await db
+      .collection('members')
+      .where({
+        roomId: room._id,
+        recoveryCodeHash: codeHash,
+        active: true,
+      })
+      .limit(1)
+      .get()
+    member = memberResult.data[0] || null
+  }
   if (!member) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
@@ -1885,6 +1973,7 @@ async function handleRecoverAccount(event) {
         requestedDeviceLabel: event.deviceLabel,
         method: 'personal_code',
         actorMemberId: member._id,
+        skipMemberValidation: true,
       }),
     )
     return await finishRecovery(room, recovered)
@@ -2343,9 +2432,35 @@ async function handleRevokeDevice(event, member, session) {
 
 async function handleRotateRecoveryCode(member) {
   const recoveryCode = createRecoveryCode()
-  await db.collection('members').doc(member._id).update({
-    recoveryCodeHash: hashToken(recoveryCode),
-    recoveryCodeUpdatedAt: nowIso(),
+  const codeHash = hashToken(recoveryCode)
+  const updatedAt = nowIso()
+  const room = await getRoom(member.roomId)
+  if (!room || room.closed) {
+    return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  }
+  const recoveryDirectory = {
+    ...(room.recoveryDirectory || {}),
+    [member._id]: codeHash,
+  }
+  await db.runTransaction(async (transaction) => {
+    await transaction.collection('members').doc(member._id).update({
+      recoveryCodeHash: codeHash,
+      recoveryCodeUpdatedAt: updatedAt,
+    })
+    await transaction.collection('rooms').doc(member.roomId).update({
+      recoveryDirectory,
+      updatedAt,
+    })
+    await transaction
+      .collection('personalRecoveryCodes')
+      .doc(personalRecoveryDocumentId(recoveryCode))
+      .set({
+        memberId: member._id,
+        roomId: member.roomId,
+        codeHash,
+        active: true,
+        createdAt: updatedAt,
+      })
   })
   return ok({ recoveryCode })
 }
@@ -2980,6 +3095,7 @@ async function deleteRoomRecords(room) {
     deleteCollectionRows('pushSubscriptions', { roomId: room._id }),
     deleteCollectionRows('joinRequests', { roomId: room._id }),
     deleteCollectionRows('temporaryRecoveryCodes', { roomId: room._id }),
+    deleteCollectionRows('personalRecoveryCodes', { roomId: room._id }),
     deleteCollectionRows('accountRecoveryAudit', { roomId: room._id }),
   ])
   await db.collection('rooms').doc(room._id).delete()
@@ -3190,6 +3306,35 @@ async function handleAdminSaveFeedbackBark(event) {
   })
 }
 
+async function handleAdminCheckRecoveryCode(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-check-recovery-code',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const room = await getRoom(cleanText(event.roomId, 100))
+  const member = await getDocument('members', cleanText(event.memberId, 100))
+  const code = normalizeSecret(event.recoveryCode)
+  const codeHash = hashToken(code)
+  const directDocument = await getDocument(
+    'personalRecoveryCodes',
+    personalRecoveryDocumentId(code),
+  )
+  return ok({
+    roomFound: Boolean(room),
+    memberFound: Boolean(member),
+    memberHashMatch: member?.recoveryCodeHash === codeHash,
+    directoryHashMatch:
+      room?.recoveryDirectory?.[member?._id || ''] === codeHash,
+    directDocumentFound: Boolean(directDocument),
+    directDocumentHashMatch: directDocument?.codeHash === codeHash,
+    directDocumentActive: Boolean(directDocument?.active),
+  })
+}
+
 async function handleAdminListRooms(event) {
   const keyCheck = await verifyConfiguredSecret(
     event,
@@ -3301,6 +3446,9 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'adminSaveFeedbackBark') {
       return await handleAdminSaveFeedbackBark(event)
+    }
+    if (event.action === 'adminCheckRecoveryCode') {
+      return await handleAdminCheckRecoveryCode(event)
     }
 
     const context = await findAuthenticatedContext(event.memberToken)
