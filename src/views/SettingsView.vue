@@ -14,6 +14,7 @@ import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
 import BarkNotificationPanel from '../components/BarkNotificationPanel.vue'
 import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
+import RecoveryAuditPanel from '../components/RecoveryAuditPanel.vue'
 import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
 import StatusIcon from '../components/StatusIcon.vue'
 import { useDormStore } from '../composables/useDormStore'
@@ -69,7 +70,7 @@ async function handleSaveProfile(): Promise<void> {
 }
 
 async function handleLeaveRoom(): Promise<void> {
-  if (!window.confirm('退出后将无法继续查看宿舍状态，重新加入需要新的邀请码。继续吗？')) {
+  if (!window.confirm('退出后将无法继续查看宿舍状态，重新加入需要新的宿舍分享号。继续吗？')) {
     return
   }
 
@@ -168,6 +169,7 @@ onBeforeUnmount(() => {
         <BarkNotificationPanel @notify="showToast" />
 
         <AccountDevicePanel :demo-mode="demoMode" @notify="showToast" />
+        <RecoveryAuditPanel />
       </div>
 
       <aside class="settings-aside">

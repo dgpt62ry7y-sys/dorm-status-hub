@@ -118,7 +118,7 @@ async function confirmChange(): Promise<void> {
               <h2 id="capacity-dialog-title">确认切换宿舍房型</h2>
               <p>
                 宿舍将从 {{ currentCapacity }} 人寝调整为
-                {{ targetCapacity }} 人寝，邀请码保持不变。
+                {{ targetCapacity }} 人寝，宿舍分享号保持不变。
               </p>
             </div>
 

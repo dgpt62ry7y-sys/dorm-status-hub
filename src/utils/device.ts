@@ -1,3 +1,19 @@
+const DEVICE_INSTANCE_KEY = 'dormsync:device-instance:v1'
+
+export function createClientId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+export function getDeviceInstanceId(): string {
+  const existing = localStorage.getItem(DEVICE_INSTANCE_KEY)
+  if (existing) return existing
+  const next = createClientId()
+  localStorage.setItem(DEVICE_INSTANCE_KEY, next)
+  return next
+}
+
 export function getDeviceLabel(): string {
   const userAgent = navigator.userAgent
 

@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { Crown, KeyRound, RefreshCw, Share2, UserMinus, UserRound } from '@lucide/vue'
+import {
+  Crown,
+  KeyRound,
+  RefreshCw,
+  Share2,
+  ShieldCheck,
+  UserMinus,
+  UserRound,
+} from '@lucide/vue'
 import AppToast from '../components/AppToast.vue'
+import SecretCodeDialog from '../components/SecretCodeDialog.vue'
 import { useDormStore } from '../composables/useDormStore'
 import { formatDateLabel } from '../utils/time'
 import {
@@ -16,12 +25,21 @@ const {
   isOwner,
   regenerateInvite,
   removeMember,
+  createMemberRecoveryCode,
+  createOwnerRecoveryCode,
 } = useDormStore()
 const toastMessage = ref('')
 const toastVisible = ref(false)
 const demoMode = __DEMO_MODE__
 const regenerating = ref(false)
 const removingId = ref('')
+const generatingRecoveryFor = ref('')
+const recoveryDialog = ref({
+  visible: false,
+  title: '',
+  description: '',
+  code: '',
+})
 let toastTimer: number | undefined
 
 const inviteUrl = computed(() => {
@@ -48,16 +66,16 @@ async function handleShare(): Promise<void> {
     showToast(result.message)
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
-    showToast('暂时无法分享，请手动复制邀请码')
+    showToast('暂时无法分享，请手动复制宿舍分享号')
   }
 }
 
 async function handleRegenerate(): Promise<void> {
-  if (!window.confirm('重新生成后，旧邀请码会立即失效。继续吗？')) return
+  if (!window.confirm('重新生成后，旧分享号会立即失效，未使用的临时恢复码也会失效。继续吗？')) return
   regenerating.value = true
   try {
     await regenerateInvite()
-    showToast('邀请码已更新')
+    showToast('宿舍分享号已更新')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '更新失败，请重试')
   } finally {
@@ -75,6 +93,55 @@ async function handleRemove(memberId: string, nickname: string): Promise<void> {
     showToast(error instanceof Error ? error.message : '移除失败，请重试')
   } finally {
     removingId.value = ''
+  }
+}
+
+async function handleCreateMemberRecoveryCode(memberId: string, nickname: string): Promise<void> {
+  if (
+    !window.confirm(
+      `为「${nickname}」生成 10 分钟有效、只能使用一次的身份恢复码？请先确认对方身份。`,
+    )
+  ) {
+    return
+  }
+  generatingRecoveryFor.value = memberId
+  try {
+    const result = await createMemberRecoveryCode(memberId)
+    recoveryDialog.value = {
+      visible: true,
+      title: '成员临时恢复码',
+      description: `仅用于恢复「${nickname}」的原账号，10 分钟内有效且只能使用一次。`,
+      code: result.code,
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '临时恢复码生成失败')
+  } finally {
+    generatingRecoveryFor.value = ''
+  }
+}
+
+async function handleCreateOwnerRecoveryCode(): Promise<void> {
+  if (
+    !window.confirm(
+      '生成后请发给房主。房主恢复还需要另一名成员生成的第二个恢复码。继续吗？',
+    )
+  ) {
+    return
+  }
+  generatingRecoveryFor.value = 'owner'
+  try {
+    const result = await createOwnerRecoveryCode()
+    recoveryDialog.value = {
+      visible: true,
+      title: '房主临时恢复码 A/B',
+      description:
+        '把这一个恢复码发给房主。房主还必须取得另一名不同成员生成的第二个恢复码。',
+      code: result.code,
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '房主临时恢复码生成失败')
+  } finally {
+    generatingRecoveryFor.value = ''
   }
 }
 
@@ -110,10 +177,10 @@ onBeforeUnmount(() => {
         <p v-if="demoMode">
           体验版使用浏览器内存虚拟数据。把链接分享给朋友，每个人都会得到独立演示。
         </p>
-        <p v-else>把链接或邀请码发到宿舍群，对方点击后即可加入。</p>
+        <p v-else>把链接或六位宿舍分享号发到宿舍群，新人加入或老成员恢复时使用。</p>
       </div>
       <div class="invite-band__code">
-        <span>{{ demoMode ? '体验模式' : '邀请码' }}</span>
+        <span>{{ demoMode ? '体验模式' : '宿舍分享号' }}</span>
         <strong>{{ demoMode ? '虚拟' : state.room.inviteCode }}</strong>
         <button
           v-if="isOwner && !demoMode"
@@ -167,6 +234,22 @@ onBeforeUnmount(() => {
               {{ member.role === 'owner' ? '创建者' : '成员' }}
             </span>
             <button
+              v-if="isOwner && member.role !== 'owner' && !demoMode"
+              type="button"
+              class="member-recovery"
+              :disabled="generatingRecoveryFor === member.id"
+              @click="handleCreateMemberRecoveryCode(member.id, member.nickname)"
+            >
+              <RefreshCw
+                v-if="generatingRecoveryFor === member.id"
+                class="spin"
+                :size="15"
+                aria-hidden="true"
+              />
+              <ShieldCheck v-else :size="15" aria-hidden="true" />
+              协助恢复
+            </button>
+            <button
               v-if="isOwner && member.role !== 'owner'"
               type="button"
               class="member-remove"
@@ -189,12 +272,50 @@ onBeforeUnmount(() => {
           <span class="avatar avatar--empty" aria-hidden="true">+</span>
           <div class="member-row__copy">
             <strong>等待室友加入</strong>
-            <p>把邀请码发到宿舍群即可</p>
+            <p>把宿舍分享号发到宿舍群即可</p>
           </div>
         </article>
       </div>
     </section>
 
+    <section
+      v-if="!demoMode && !isOwner"
+      class="owner-recovery-band"
+      aria-labelledby="owner-recovery-heading"
+    >
+      <div>
+        <p class="eyebrow">房主应急恢复</p>
+        <h2 id="owner-recovery-heading">房主忘记恢复码时</h2>
+        <p>
+          你可以生成一个 10 分钟临时恢复码。房主恢复时还需要另一名不同成员生成第二个码。
+        </p>
+      </div>
+      <button
+        type="button"
+        class="button button--secondary"
+        :disabled="generatingRecoveryFor === 'owner'"
+        @click="handleCreateOwnerRecoveryCode"
+      >
+        <RefreshCw
+          v-if="generatingRecoveryFor === 'owner'"
+          class="spin"
+          :size="16"
+          aria-hidden="true"
+        />
+        <ShieldCheck v-else :size="16" aria-hidden="true" />
+        {{ generatingRecoveryFor === 'owner' ? '正在生成…' : '生成房主恢复码' }}
+      </button>
+    </section>
+
+    <SecretCodeDialog
+      :visible="recoveryDialog.visible"
+      :title="recoveryDialog.title"
+      :description="recoveryDialog.description"
+      :code="recoveryDialog.code"
+      confirm-label="关闭"
+      @close="recoveryDialog.visible = false"
+      @confirm="recoveryDialog.visible = false"
+    />
     <AppToast :message="toastMessage" :visible="toastVisible" />
   </div>
 </template>

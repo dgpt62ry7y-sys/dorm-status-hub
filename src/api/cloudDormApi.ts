@@ -7,9 +7,11 @@ import type {
   DormState,
   DormStatus,
   NotificationSettings,
+  RecoveryAuditEntry,
   RevokeDeviceResult,
   RoomCapacity,
   StatusUpdate,
+  TemporaryRecoveryCodeResult,
 } from '../types/dorm'
 
 interface ApiSuccess<T> {
@@ -105,22 +107,67 @@ export const cloudDormApi = {
     roomName: string
     nickname: string
     deviceLabel: string
+    deviceInstanceId: string
     capacity: RoomCapacity
     creatorKey: string
   }) {
     return callApi<SessionResult>('createRoom', input)
   },
 
-  joinRoom(input: { inviteCode: string; nickname: string; deviceLabel: string }) {
+  joinRoom(input: {
+    inviteCode: string
+    nickname: string
+    deviceLabel: string
+    deviceInstanceId: string
+    joinRequestId: string
+  }) {
     return callApi<SessionResult>('joinRoom', input)
   },
 
-  claimDeviceLink(input: { code: string; deviceLabel: string }) {
+  claimDeviceLink(input: {
+    code: string
+    deviceLabel: string
+    deviceInstanceId: string
+  }) {
     return callApi<SessionResult>('claimDeviceLink', input)
   },
 
-  recoverAccount(input: { recoveryCode: string; deviceLabel: string }) {
+  recoverAccount(input: {
+    inviteCode: string
+    recoveryCode: string
+    deviceLabel: string
+    deviceInstanceId: string
+  }) {
     return callApi<SessionResult>('recoverAccount', input)
+  },
+
+  recoverWithAssistance(input: {
+    inviteCode: string
+    recoveryMode: 'member' | 'owner'
+    recoveryCodes: string[]
+    deviceLabel: string
+    deviceInstanceId: string
+  }) {
+    return callApi<SessionResult>('recoverWithAssistance', input)
+  },
+
+  createMemberRecoveryCode(memberToken: string, targetMemberId: string) {
+    return callApi<TemporaryRecoveryCodeResult>('createMemberRecoveryCode', {
+      memberToken,
+      targetMemberId,
+    })
+  },
+
+  createOwnerRecoveryCode(memberToken: string) {
+    return callApi<TemporaryRecoveryCodeResult>('createOwnerRecoveryCode', {
+      memberToken,
+    })
+  },
+
+  listRecoveryAudit(memberToken: string) {
+    return callApi<{ entries: RecoveryAuditEntry[] }>('listRecoveryAudit', {
+      memberToken,
+    })
   },
 
   getState(

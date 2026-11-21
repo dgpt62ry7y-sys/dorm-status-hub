@@ -10,12 +10,14 @@ const MAX_ROOM_CAPACITY = 6
 const VALID_ROOM_CAPACITIES = new Set([4, 6])
 const MAX_DEVICES = 5
 const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
+const TEMP_RECOVERY_TTL_MS = 10 * 60 * 1000
 const SECURITY_WINDOW_MS = 15 * 60 * 1000
 const MAX_SECURITY_ATTEMPTS = 5
 const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['joinRoom', { scope: 'join-room', maxAttempts: 30 }],
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
   ['recoverAccount', { scope: 'recover-account', maxAttempts: 10 }],
+  ['recoverWithAssistance', { scope: 'recover-with-assistance', maxAttempts: 10 }],
 ])
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
@@ -50,6 +52,9 @@ const COLLECTIONS = [
   'securityAttempts',
   'systemSettings',
   'pushSubscriptions',
+  'joinRequests',
+  'temporaryRecoveryCodes',
+  'accountRecoveryAudit',
 ]
 const CURRENT_RELEASE_VERSION = releases.at(-1).version
 
@@ -98,6 +103,10 @@ function createRecoveryCode() {
 
 function createDeviceLinkCode() {
   return createInviteCode(8)
+}
+
+function createTemporaryRecoveryCode() {
+  return createInviteCode(16)
 }
 
 function normalizeInviteCode(value) {
@@ -777,12 +786,16 @@ async function getStatuses(roomId) {
   return result.data
 }
 
-async function insertDeviceSession(collection, { memberId, roomId, memberToken, label }) {
+async function insertDeviceSession(
+  collection,
+  { memberId, roomId, memberToken, label, deviceInstanceId = '' },
+) {
   const createdAt = nowIso()
   const result = await collection.add({
     memberId,
     roomId,
     tokenHash: hashToken(memberToken),
+    deviceInstanceId: cleanText(deviceInstanceId, 100),
     label,
     active: true,
     createdAt,
@@ -790,6 +803,165 @@ async function insertDeviceSession(collection, { memberId, roomId, memberToken, 
     revokedAt: null,
   })
   return insertedId(result)
+}
+
+function normalizeDeviceInstanceId(value) {
+  const normalized = cleanText(value, 100)
+  return /^[A-Za-z0-9_-]{16,100}$/.test(normalized) ? normalized : ''
+}
+
+function temporaryRecoveryDocumentId(code) {
+  return hashToken(`temporary-recovery:${normalizeSecret(code)}`)
+}
+
+async function completeRecoveryInTransaction(
+  transaction,
+  {
+    member,
+    deviceInstanceId,
+    requestedDeviceLabel,
+    method,
+    actorMemberId,
+    generatorMemberIds = [],
+    generatorNicknames = [],
+  },
+) {
+  const memberResult = await transaction.collection('members').doc(member._id).get()
+  const activeMember = memberResult.data?.[0]
+  if (!activeMember?.active || activeMember.roomId !== member.roomId) {
+    throw new Error('RECOVERY_TARGET_INVALID')
+  }
+
+  const sessionsResult = await transaction
+    .collection('deviceSessions')
+    .where({ memberId: member._id, active: true })
+    .limit(MAX_DEVICES + 1)
+    .get()
+  const sessions = sessionsResult.data
+  const existingSession = sessions.find(
+    (session) => session.deviceInstanceId === deviceInstanceId,
+  )
+  const memberToken = randomToken()
+  const seenAt = nowIso()
+  let sessionId
+
+  if (existingSession) {
+    sessionId = existingSession._id
+    await transaction.collection('deviceSessions').doc(sessionId).update({
+      tokenHash: hashToken(memberToken),
+      label: deviceLabel(requestedDeviceLabel || existingSession.label),
+      lastSeenAt: seenAt,
+      revokedAt: null,
+    })
+  } else {
+    if (sessions.length >= MAX_DEVICES) {
+      const oldest = [...sessions].sort(
+        (left, right) =>
+          Date.parse(left.lastSeenAt || left.createdAt || '') -
+          Date.parse(right.lastSeenAt || right.createdAt || ''),
+      )[0]
+      if (oldest) {
+        await transaction.collection('deviceSessions').doc(oldest._id).update({
+          active: false,
+          revokedAt: seenAt,
+          revokedReason: 'account_recovery',
+        })
+      }
+    }
+    sessionId = await insertDeviceSession(transaction.collection('deviceSessions'), {
+      memberId: member._id,
+      roomId: member.roomId,
+      memberToken,
+      label: deviceLabel(requestedDeviceLabel),
+      deviceInstanceId,
+    })
+  }
+
+  await transaction.collection('accountRecoveryAudit').add({
+    roomId: member.roomId,
+    targetMemberId: member._id,
+    targetNickname: activeMember.nickname,
+    actorMemberId: actorMemberId || member._id,
+    generatorMemberIds,
+    generatorNicknames,
+    eventType: 'account_recovered',
+    method,
+    deviceInstanceIdHash: hashToken(deviceInstanceId),
+    createdAt: seenAt,
+  })
+
+  return {
+    memberToken,
+    sessionId,
+    member: activeMember,
+  }
+}
+
+async function issueTemporaryRecoveryCode({
+  room,
+  targetMember,
+  generatorMember,
+  type,
+}) {
+  const code = createTemporaryRecoveryCode()
+  const codeId = temporaryRecoveryDocumentId(code)
+  const createdAt = nowIso()
+  const expiresAt = new Date(Date.now() + TEMP_RECOVERY_TTL_MS).toISOString()
+  const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
+
+  await db.runTransaction(async (transaction) => {
+    const previousResult = await transaction
+      .collection('temporaryRecoveryCodes')
+      .where({
+        roomId: room._id,
+        targetMemberId: targetMember._id,
+        generatorMemberId: generatorMember._id,
+        type,
+        active: true,
+      })
+      .limit(10)
+      .get()
+    await Promise.all(
+      previousResult.data.map((item) =>
+        transaction.collection('temporaryRecoveryCodes').doc(item._id).update({
+          active: false,
+          revokedAt: createdAt,
+        }),
+      ),
+    )
+    await transaction.collection('temporaryRecoveryCodes').doc(codeId).set({
+      roomId: room._id,
+      targetMemberId: targetMember._id,
+      targetNickname: targetMember.nickname,
+      generatorMemberId: generatorMember._id,
+      generatorNickname: generatorMember.nickname,
+      type,
+      inviteCodeHash,
+      active: true,
+      usedAt: null,
+      revokedAt: null,
+      createdAt,
+      expiresAt,
+    })
+    await transaction.collection('accountRecoveryAudit').add({
+      roomId: room._id,
+      targetMemberId: targetMember._id,
+      targetNickname: targetMember.nickname,
+      actorMemberId: generatorMember._id,
+      actorNickname: generatorMember.nickname,
+      generatorMemberIds: [generatorMember._id],
+      eventType: 'code_generated',
+      method: type,
+      createdAt,
+    })
+  })
+
+  return {
+    code,
+    expiresAt,
+    targetNickname: targetMember.nickname,
+    type,
+  }
 }
 
 async function getActiveDeviceSessions(memberId, limit = MAX_DEVICES + 1) {
@@ -1175,7 +1347,13 @@ async function generateUniqueCode(collection = db.collection('rooms')) {
   throw new Error('INVITE_CODE_GENERATION_FAILED')
 }
 
-async function insertMember(transaction, { roomId, nickname, role, label }) {
+async function insertMember(transaction, {
+  roomId,
+  nickname,
+  role,
+  label,
+  deviceInstanceId,
+}) {
   const memberToken = randomToken()
   const recoveryCode = createRecoveryCode()
   const joinedAt = nowIso()
@@ -1197,6 +1375,7 @@ async function insertMember(transaction, { roomId, nickname, role, label }) {
     roomId,
     memberToken,
     label: deviceLabel(label),
+    deviceInstanceId,
   })
 
   await transaction.collection('statuses').add({
@@ -1225,6 +1404,7 @@ async function handleCreateRoom(event) {
   const nickname = cleanText(event.nickname, 12)
   const roomName = cleanText(event.roomName || '我的宿舍', 20)
   const capacity = Number(event.capacity || DEFAULT_ROOM_CAPACITY)
+  const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
   if (!nickname) return fail('NICKNAME_REQUIRED', '请输入昵称')
   if (!roomName) return fail('ROOM_NAME_REQUIRED', '请输入宿舍名称')
   if (!VALID_ROOM_CAPACITIES.has(capacity)) {
@@ -1264,6 +1444,7 @@ async function handleCreateRoom(event) {
       nickname,
       role: 'owner',
       label: event.deviceLabel,
+      deviceInstanceId,
     })
     await rooms.doc(roomId).update({
       ownerId: member.memberId,
@@ -1283,11 +1464,69 @@ async function handleCreateRoom(event) {
 async function handleJoinRoom(event) {
   const nickname = cleanText(event.nickname, 12)
   const inviteCode = normalizeInviteCode(event.inviteCode)
+  const joinRequestId = cleanText(event.joinRequestId, 100)
+  const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
   if (!nickname) return fail('NICKNAME_REQUIRED', '请输入昵称')
-  if (!inviteCode) return fail('INVITE_REQUIRED', '请输入邀请码')
+  if (!inviteCode) return fail('INVITE_REQUIRED', '请输入宿舍分享号')
+  if (!/^[A-Za-z0-9_-]{16,100}$/.test(joinRequestId)) {
+    return fail('JOIN_REQUEST_REQUIRED', '加入请求无效，请刷新页面后重试')
+  }
+  if (!deviceInstanceId) {
+    return fail('DEVICE_ID_REQUIRED', '无法识别当前设备，请更换浏览器后重试')
+  }
 
   try {
     const joined = await db.runTransaction(async (transaction) => {
+      const requestId = hashToken(`join-request:${joinRequestId}`)
+      const requestResult = await transaction
+        .collection('joinRequests')
+        .doc(requestId)
+        .get()
+      const existingRequest = requestResult.data?.[0]
+      const deviceInstanceIdHash = hashToken(deviceInstanceId)
+      if (existingRequest) {
+        if (existingRequest.deviceInstanceIdHash !== deviceInstanceIdHash) {
+          throw new Error('JOIN_REQUEST_DEVICE_MISMATCH')
+        }
+        const memberResult = await transaction
+          .collection('members')
+          .doc(existingRequest.memberId)
+          .get()
+        const existingMember = memberResult.data?.[0]
+        if (!existingMember?.active) throw new Error('JOIN_REQUEST_CONFLICT')
+        const sessionsResult = await transaction
+          .collection('deviceSessions')
+          .where({
+            memberId: existingMember._id,
+            deviceInstanceId,
+            active: true,
+          })
+          .limit(1)
+          .get()
+        const existingSession = sessionsResult.data[0]
+        if (!existingSession) throw new Error('JOIN_REQUEST_CONFLICT')
+        const memberToken = randomToken()
+        const sessionId = existingSession._id
+        await transaction.collection('deviceSessions').doc(sessionId).update({
+          tokenHash: hashToken(memberToken),
+          lastSeenAt: nowIso(),
+        })
+        return {
+          memberId: existingMember._id,
+          memberToken,
+          sessionId,
+        }
+      }
+
+      const existingDeviceResult = await transaction
+        .collection('deviceSessions')
+        .where({ deviceInstanceId, active: true })
+        .limit(1)
+        .get()
+      if (existingDeviceResult.data.length > 0) {
+        throw new Error('DEVICE_ALREADY_BOUND')
+      }
+
       const roomResult = await transaction
         .collection('rooms')
         .where({ inviteCode, closed: false })
@@ -1316,6 +1555,13 @@ async function handleJoinRoom(event) {
         nickname,
         role: 'member',
         label: event.deviceLabel,
+        deviceInstanceId,
+      })
+      await transaction.collection('joinRequests').doc(requestId).set({
+        roomId: room._id,
+        memberId: member.memberId,
+        deviceInstanceIdHash,
+        createdAt: nowIso(),
       })
       return member
     })
@@ -1328,11 +1574,23 @@ async function handleJoinRoom(event) {
     })
   } catch (error) {
     if (error.message === 'ROOM_NOT_FOUND') {
-      return fail('ROOM_NOT_FOUND', '邀请码无效或已失效')
+      return fail('ROOM_NOT_FOUND', '宿舍分享号无效或已失效')
     }
     if (error.message === 'ROOM_FULL') return fail('ROOM_FULL', '宿舍人数已满')
     if (error.message === 'NICKNAME_TAKEN') {
       return fail('NICKNAME_TAKEN', '这个昵称已经被使用')
+    }
+    if (error.message === 'JOIN_REQUEST_DEVICE_MISMATCH') {
+      return fail('JOIN_REQUEST_CONFLICT', '加入请求已在另一台设备处理')
+    }
+    if (error.message === 'JOIN_REQUEST_CONFLICT') {
+      return fail('JOIN_REQUEST_CONFLICT', '加入请求已经失效，请重新发起')
+    }
+    if (error.message === 'DEVICE_ALREADY_BOUND') {
+      return fail(
+        'DEVICE_ALREADY_BOUND',
+        '当前设备已经属于一个账号，请恢复原账号或先退出当前设备',
+      )
     }
     throw error
   }
@@ -1431,6 +1689,7 @@ async function handleClaimDeviceLink(event) {
     roomId: member.roomId,
     memberToken,
     label: deviceLabel(event.deviceLabel),
+    deviceInstanceId: normalizeDeviceInstanceId(event.deviceInstanceId),
   })
   await db.collection('deviceLinks').doc(codeHash).update({
     usedBySessionId: sessionId,
@@ -1441,15 +1700,56 @@ async function handleClaimDeviceLink(event) {
   return ok({ memberToken, state })
 }
 
+async function getRoomByInviteCode(inviteCode) {
+  if (!inviteCode) return null
+  const result = await db
+    .collection('rooms')
+    .where({ inviteCode, closed: false })
+    .limit(1)
+    .get()
+  return result.data[0] || null
+}
+
+async function finishRecovery(room, recovered) {
+  const state = await buildState(recovered.member, recovered.sessionId, true, true)
+  if (!state) return fail('RECOVERY_CODE_INVALID', '恢复信息已经失效')
+
+  const delivery = await sendRoomNotification(
+    room,
+    'DormSync · 账号恢复提醒',
+    [
+      `👤 ${recovered.member.nickname} 已在新设备恢复账号`,
+      `🏠 宿舍：${room.name}`,
+      '如非本人操作，请立即检查登录设备和恢复记录。',
+    ].join('\n'),
+  )
+
+  return ok({
+    memberToken: recovered.memberToken,
+    state: delivery.ok
+      ? state
+      : {
+          ...state,
+          notificationWarning: '账号已恢复，但安全提醒发送失败',
+        },
+  })
+}
+
 async function handleRecoverAccount(event) {
+  const room = await getRoomByInviteCode(normalizeInviteCode(event.inviteCode))
   const code = normalizeSecret(event.recoveryCode)
-  if (code.length !== 20) {
+  const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
+  if (!room || code.length !== 20 || !deviceInstanceId) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
 
   const memberResult = await db
     .collection('members')
-    .where({ recoveryCodeHash: hashToken(code), active: true })
+    .where({
+      roomId: room._id,
+      recoveryCodeHash: hashToken(code),
+      active: true,
+    })
     .limit(1)
     .get()
   const member = memberResult.data[0]
@@ -1457,26 +1757,257 @@ async function handleRecoverAccount(event) {
     return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
   }
 
+  try {
+    const recovered = await db.runTransaction((transaction) =>
+      completeRecoveryInTransaction(transaction, {
+        member,
+        deviceInstanceId,
+        requestedDeviceLabel: event.deviceLabel,
+        method: 'personal_code',
+        actorMemberId: member._id,
+      }),
+    )
+    return await finishRecovery(room, recovered)
+  } catch (error) {
+    if (error.message === 'RECOVERY_TARGET_INVALID') {
+      return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
+    }
+    throw error
+  }
+}
+
+async function handleCreateMemberRecoveryCode(event, currentMember) {
+  const room = await getRoom(currentMember.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId !== currentMember._id) {
+    return fail('ONLY_OWNER', '只有房主可以生成成员临时恢复码')
+  }
+
+  const target = await getDocument(
+    'members',
+    cleanText(event.targetMemberId, 100),
+  )
+  if (
+    !target ||
+    !target.active ||
+    target.roomId !== room._id ||
+    target._id === currentMember._id ||
+    target.role === 'owner'
+  ) {
+    return fail('MEMBER_NOT_FOUND', '成员不存在或已经退出')
+  }
+
+  return ok(
+    await issueTemporaryRecoveryCode({
+      room,
+      targetMember: target,
+      generatorMember: currentMember,
+      type: 'member_assist',
+    }),
+  )
+}
+
+async function handleCreateOwnerRecoveryCode(_event, currentMember) {
+  const room = await getRoom(currentMember.roomId)
+  if (!room || room.closed) return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  if (room.ownerId === currentMember._id) {
+    return fail('OWNER_CANNOT_SELF_RECOVER', '房主不能为自己的账号生成恢复码')
+  }
+
+  const owner = await getDocument('members', room.ownerId)
+  if (!owner?.active || owner.roomId !== room._id) {
+    return fail('OWNER_NOT_FOUND', '当前房主账号不可用')
+  }
+
+  return ok(
+    await issueTemporaryRecoveryCode({
+      room,
+      targetMember: owner,
+      generatorMember: currentMember,
+      type: 'owner_assist',
+    }),
+  )
+}
+
+async function handleRecoverWithAssistance(event) {
+  const room = await getRoomByInviteCode(normalizeInviteCode(event.inviteCode))
+  const mode = String(event.recoveryMode || '')
+  const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
+  const rawCodes = Array.isArray(event.recoveryCodes) ? event.recoveryCodes : []
+  const codes = rawCodes.map(normalizeSecret)
+  const expectedCount = mode === 'owner' ? 2 : mode === 'member' ? 1 : 0
+  if (
+    !room ||
+    !deviceInstanceId ||
+    !expectedCount ||
+    codes.length !== expectedCount ||
+    codes.some((code) => code.length !== 16) ||
+    new Set(codes).size !== codes.length
+  ) {
+    return fail('RECOVERY_CODE_INVALID', '临时恢复码无效，请检查后重试')
+  }
+
+  const type = mode === 'owner' ? 'owner_assist' : 'member_assist'
+  const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
+  const codeDocuments = await Promise.all(
+    codes.map((code) => getDocument('temporaryRecoveryCodes', temporaryRecoveryDocumentId(code))),
+  )
+  if (
+    codeDocuments.some(
+      (item) =>
+        !item ||
+        item.type !== type ||
+        item.roomId !== room._id ||
+        item.inviteCodeHash !== inviteCodeHash ||
+        !item.active ||
+        item.usedAt ||
+        item.revokedAt ||
+        Date.parse(item.expiresAt || '') <= Date.now(),
+    )
+  ) {
+    return fail('RECOVERY_CODE_INVALID', '临时恢复码无效或已经过期')
+  }
+
+  const targetMemberId = codeDocuments[0].targetMemberId
+  if (codeDocuments.some((item) => item.targetMemberId !== targetMemberId)) {
+    return fail('RECOVERY_CODE_INVALID', '临时恢复码不属于同一个账号')
+  }
+  const generatorIds = codeDocuments.map((item) => item.generatorMemberId)
+  if (new Set(generatorIds).size !== expectedCount) {
+    return fail('RECOVERY_CODE_INVALID', '房主恢复码必须由两名不同成员生成')
+  }
+
+  const [target, ...generators] = await Promise.all([
+    getDocument('members', targetMemberId),
+    ...generatorIds.map((memberId) => getDocument('members', memberId)),
+  ])
+  if (!target?.active || target.roomId !== room._id) {
+    return fail('RECOVERY_CODE_INVALID', '目标成员账号不可用')
+  }
+  if (generators.some((member) => !member?.active || member.roomId !== room._id)) {
+    return fail('RECOVERY_CODE_INVALID', '确认成员账号不可用')
+  }
+  if (mode === 'member') {
+    if (room.ownerId !== generatorIds[0] || target.role === 'owner') {
+      return fail('RECOVERY_CODE_INVALID', '成员临时恢复码无效')
+    }
+  } else if (
+    room.ownerId !== target._id ||
+    generatorIds.includes(target._id)
+  ) {
+    return fail('RECOVERY_CODE_INVALID', '房主临时恢复码无效')
+  }
+
+  try {
+    const recovered = await db.runTransaction(async (transaction) => {
+      const currentRoomResult = await transaction
+        .collection('rooms')
+        .doc(room._id)
+        .get()
+      const currentRoom = currentRoomResult.data?.[0]
+      if (!currentRoom || currentRoom.closed) {
+        throw new Error('RECOVERY_CODE_INVALID')
+      }
+      const currentInviteHash =
+        currentRoom.inviteCodeHash || hashToken(currentRoom.inviteCode)
+      if (currentInviteHash !== inviteCodeHash) {
+        throw new Error('RECOVERY_CODE_INVALID')
+      }
+      const currentTargetResult = await transaction
+        .collection('members')
+        .doc(target._id)
+        .get()
+      const currentTarget = currentTargetResult.data?.[0]
+      if (!currentTarget?.active || currentTarget.roomId !== room._id) {
+        throw new Error('RECOVERY_CODE_INVALID')
+      }
+      if (
+        (mode === 'owner' && currentRoom.ownerId !== currentTarget._id) ||
+        (mode === 'member' && currentRoom.ownerId !== generatorIds[0])
+      ) {
+        throw new Error('RECOVERY_CODE_INVALID')
+      }
+
+      const freshCodeResults = await Promise.all(
+        codeDocuments.map((item) =>
+          transaction.collection('temporaryRecoveryCodes').doc(item._id).get(),
+        ),
+      )
+      const freshCodes = freshCodeResults.map((result) => result.data?.[0])
+      if (
+        freshCodes.some(
+          (item) =>
+            !item ||
+            item.type !== type ||
+            item.roomId !== room._id ||
+            item.targetMemberId !== target._id ||
+            item.inviteCodeHash !== inviteCodeHash ||
+            !item.active ||
+            item.usedAt ||
+            item.revokedAt ||
+            Date.parse(item.expiresAt || '') <= Date.now(),
+        ) ||
+        new Set(freshCodes.map((item) => item.generatorMemberId)).size !==
+          expectedCount
+      ) {
+        throw new Error('RECOVERY_CODE_INVALID')
+      }
+
+      const completed = await completeRecoveryInTransaction(transaction, {
+        member: currentTarget,
+        deviceInstanceId,
+        requestedDeviceLabel: event.deviceLabel,
+        method: mode === 'owner' ? 'owner_assistance' : 'member_assistance',
+        actorMemberId: target._id,
+        generatorMemberIds: generatorIds,
+        generatorNicknames: generators.map((member) => member.nickname),
+      })
+      const usedAt = nowIso()
+      await Promise.all(
+        codeDocuments.map((item) =>
+          transaction.collection('temporaryRecoveryCodes').doc(item._id).update({
+            active: false,
+            usedAt,
+          }),
+        ),
+      )
+      return completed
+    })
+    return await finishRecovery(room, recovered)
+  } catch (error) {
+    if (
+      ['RECOVERY_CODE_INVALID', 'RECOVERY_TARGET_INVALID'].includes(error.message)
+    ) {
+      return fail('RECOVERY_CODE_INVALID', '临时恢复码无效或已经过期')
+    }
+    throw error
+  }
+}
+
+async function handleListRecoveryAudit(member) {
   const room = await getRoom(member.roomId)
-  if (!room || room.closed) {
-    return fail('RECOVERY_CODE_INVALID', '恢复码无效，请检查后重试')
+  if (!room || room.ownerId !== member._id) {
+    return fail('ONLY_OWNER', '只有房主可以查看账号恢复记录')
   }
-
-  const sessions = await getActiveDeviceSessions(member._id)
-  if (sessions.length >= MAX_DEVICES) {
-    return fail('DEVICE_LIMIT_REACHED', '账号已经绑定 5 台设备')
-  }
-
-  const memberToken = randomToken()
-  const sessionId = await insertDeviceSession(db.collection('deviceSessions'), {
-    memberId: member._id,
-    roomId: member.roomId,
-    memberToken,
-    label: deviceLabel(event.deviceLabel),
-  })
-  const state = await buildState(member, sessionId, true, true)
-  if (!state) return fail('RECOVERY_CODE_INVALID', '恢复码已失效')
-  return ok({ memberToken, state })
+  const result = await db
+    .collection('accountRecoveryAudit')
+    .where({ roomId: room._id })
+    .limit(100)
+    .get()
+  const entries = result.data
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 30)
+    .map((item) => ({
+      id: item._id,
+      eventType: item.eventType,
+      method: item.method,
+      targetMemberId: item.targetMemberId,
+      targetNickname: item.targetNickname,
+      actorNickname: item.actorNickname || '',
+      generatorNicknames: item.generatorNicknames || [],
+      createdAt: item.createdAt,
+    }))
+  return ok({ entries })
 }
 
 async function listMemberDevices(memberId, currentDeviceId) {
@@ -1870,7 +2401,7 @@ async function handleUpdateProfile(event, member, currentDeviceId) {
 async function handleRegenerateInvite(member, currentDeviceId) {
   const room = await getRoom(member.roomId)
   if (!room || room.ownerId !== member._id) {
-    return fail('ONLY_OWNER', '只有宿舍创建者可以重新生成邀请码')
+    return fail('ONLY_OWNER', '只有宿舍创建者可以重新生成宿舍分享号')
   }
 
   const inviteCode = await db.runTransaction(async (transaction) => {
@@ -2115,6 +2646,26 @@ async function deleteCollectionRows(collectionName, query, limit = 100) {
   return result.data.length
 }
 
+async function cleanupRecoveryArtifacts() {
+  const result = await db
+    .collection('temporaryRecoveryCodes')
+    .limit(500)
+    .get()
+  const stale = result.data.filter(
+    (item) =>
+      !item.active ||
+      item.usedAt ||
+      item.revokedAt ||
+      Date.parse(item.expiresAt || '') <= Date.now(),
+  )
+  await Promise.all(
+    stale.map((item) =>
+      db.collection('temporaryRecoveryCodes').doc(item._id).delete(),
+    ),
+  )
+  return stale.length
+}
+
 async function deleteRoomRecords(room) {
   if (!room?._id) return
   const members = await getActiveMembers(room._id)
@@ -2137,6 +2688,9 @@ async function deleteRoomRecords(room) {
     deleteCollectionRows('releaseClaims', { roomId: room._id }),
     deleteCollectionRows('systemSettings', { roomId: room._id }),
     deleteCollectionRows('pushSubscriptions', { roomId: room._id }),
+    deleteCollectionRows('joinRequests', { roomId: room._id }),
+    deleteCollectionRows('temporaryRecoveryCodes', { roomId: room._id }),
+    deleteCollectionRows('accountRecoveryAudit', { roomId: room._id }),
   ])
   await db.collection('rooms').doc(room._id).delete()
 }
@@ -2259,6 +2813,9 @@ async function dispatch(event = {}) {
     if (event.action === 'joinRoom') return await handleJoinRoom(event)
     if (event.action === 'claimDeviceLink') return await handleClaimDeviceLink(event)
     if (event.action === 'recoverAccount') return await handleRecoverAccount(event)
+    if (event.action === 'recoverWithAssistance') {
+      return await handleRecoverWithAssistance(event)
+    }
     if (event.action === 'adminListRooms') return await handleAdminListRooms(event)
 
     const context = await findAuthenticatedContext(event.memberToken)
@@ -2310,6 +2867,15 @@ async function dispatch(event = {}) {
     }
     if (event.action === 'rotateRecoveryCode') {
       return await handleRotateRecoveryCode(member)
+    }
+    if (event.action === 'createMemberRecoveryCode') {
+      return await handleCreateMemberRecoveryCode(event, member)
+    }
+    if (event.action === 'createOwnerRecoveryCode') {
+      return await handleCreateOwnerRecoveryCode(event, member)
+    }
+    if (event.action === 'listRecoveryAudit') {
+      return await handleListRecoveryAudit(member)
     }
     if (event.action === 'getNotificationSettings') {
       return await handleGetNotificationSettings(member)
@@ -2374,8 +2940,14 @@ exports.__testPresence = {
 
 exports.cleanup = async () => {
   await ensureCollections()
-  const result = await cleanupExpiredUnverifiedRooms()
-  return ok(result)
+  const [roomResult, codeResult] = await Promise.all([
+    cleanupExpiredUnverifiedRooms(),
+    cleanupRecoveryArtifacts(),
+  ])
+  return ok({
+    ...roomResult,
+    expiredRecoveryCodesDeleted: codeResult,
+  })
 }
 
 exports.main = async (event = {}) => {

@@ -331,6 +331,8 @@ const server = http.createServer(async (request, response) => {
           inviteCode: created.state.room.inviteCode,
           nickname: `测试成员 ${index}`,
           deviceLabel: `Local Test · Account ${index}`,
+          joinRequestId: crypto.randomUUID(),
+          deviceInstanceId: crypto.randomUUID(),
         })
         accounts.push({
           memberId: joined.state.currentMemberId,

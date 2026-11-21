@@ -10,7 +10,11 @@ import type {
   RoomCapacity,
   StatusUpdate,
 } from '../types/dorm'
-import { getDeviceLabel } from '../utils/device'
+import {
+  createClientId,
+  getDeviceInstanceId,
+  getDeviceLabel,
+} from '../utils/device'
 
 export type StorePhase = 'loading' | 'onboarding' | 'ready' | 'error'
 
@@ -78,6 +82,8 @@ let devicesRequestInFlight: Promise<void> | null = null
 let lifecycleBound = false
 let initialized = false
 let lastFocusRetryAt = 0
+let pendingJoinRequestKey = ''
+let pendingJoinRequestId = ''
 
 function applyState(next: DormState): void {
   const previousRealtime = state.room.realtime
@@ -467,6 +473,7 @@ async function createRoom(
     roomName,
     nickname,
     deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
     capacity,
     creatorKey,
   })
@@ -478,11 +485,20 @@ async function createRoom(
 }
 
 async function joinRoom(inviteCode: string, nickname: string): Promise<void> {
+  const requestKey = `${inviteCode.trim().toUpperCase()}:${nickname.trim()}`
+  if (pendingJoinRequestKey !== requestKey || !pendingJoinRequestId) {
+    pendingJoinRequestKey = requestKey
+    pendingJoinRequestId = createClientId()
+  }
   const result = await cloudDormApi.joinRoom({
     inviteCode,
     nickname,
     deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
+    joinRequestId: pendingJoinRequestId,
   })
+  pendingJoinRequestKey = ''
+  pendingJoinRequestId = ''
   saveSession(result.memberToken, result.state)
   if (!initialServerVersion.value) {
     initialServerVersion.value = result.state.serverVersion || ''
@@ -494,6 +510,7 @@ async function linkDevice(code: string): Promise<void> {
   const result = await cloudDormApi.claimDeviceLink({
     code,
     deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
   })
   saveSession(result.memberToken, result.state)
   if (!initialServerVersion.value) {
@@ -501,15 +518,50 @@ async function linkDevice(code: string): Promise<void> {
   }
 }
 
-async function recoverAccount(recoveryCode: string): Promise<void> {
+async function recoverAccount(
+  inviteCode: string,
+  recoveryCode: string,
+): Promise<void> {
   const result = await cloudDormApi.recoverAccount({
+    inviteCode,
     recoveryCode,
     deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
   })
   saveSession(result.memberToken, result.state)
   if (!initialServerVersion.value) {
     initialServerVersion.value = result.state.serverVersion || ''
   }
+}
+
+async function recoverWithAssistance(
+  inviteCode: string,
+  recoveryMode: 'member' | 'owner',
+  recoveryCodes: string[],
+): Promise<void> {
+  const result = await cloudDormApi.recoverWithAssistance({
+    inviteCode,
+    recoveryMode,
+    recoveryCodes,
+    deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
+  })
+  saveSession(result.memberToken, result.state)
+  if (!initialServerVersion.value) {
+    initialServerVersion.value = result.state.serverVersion || ''
+  }
+}
+
+async function createMemberRecoveryCode(targetMemberId: string) {
+  return cloudDormApi.createMemberRecoveryCode(memberToken.value, targetMemberId)
+}
+
+async function createOwnerRecoveryCode() {
+  return cloudDormApi.createOwnerRecoveryCode(memberToken.value)
+}
+
+async function listRecoveryAudit() {
+  return cloudDormApi.listRecoveryAudit(memberToken.value)
 }
 
 async function saveStatus(update: StatusUpdate): Promise<string | null> {
@@ -764,6 +816,10 @@ export function useDormStore() {
     joinRoom,
     linkDevice,
     recoverAccount,
+    recoverWithAssistance,
+    createMemberRecoveryCode,
+    createOwnerRecoveryCode,
+    listRecoveryAudit,
     saveStatus,
     saveProfile,
     updateNickname,

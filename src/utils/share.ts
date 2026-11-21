@@ -20,7 +20,7 @@ export async function shareDormInvite(roomName: string, inviteCode: string): Pro
   url.search = `?invite=${encodeURIComponent(inviteCode)}`
   url.hash = ''
 
-  const text = `加入「${roomName}」，邀请码：${inviteCode}`
+  const text = `加入「${roomName}」，宿舍分享号：${inviteCode}`
 
   if (navigator.share) {
     await navigator.share({
@@ -46,7 +46,7 @@ export async function shareDormInvite(roomName: string, inviteCode: string): Pro
     textarea.remove()
   }
 
-  return { method: 'clipboard', message: '邀请链接和邀请码已复制' }
+  return { method: 'clipboard', message: '邀请链接和宿舍分享号已复制' }
 }
 
 export async function shareDemoExperience(): Promise<ShareResult> {

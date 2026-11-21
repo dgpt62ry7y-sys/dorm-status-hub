@@ -1,4 +1,5 @@
 const path = require('node:path')
+const crypto = require('node:crypto')
 const {
   createMemoryDatabase,
   installCloudBaseMock,
@@ -87,6 +88,8 @@ async function run() {
       inviteCode: created.state.room.inviteCode,
       nickname: `成员${suffix}`,
       deviceLabel: 'Pending Member',
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
     }),
     'join pending room',
   )
@@ -222,6 +225,8 @@ async function run() {
         inviteCode: 'AAAAAA',
         nickname: `枚举${attempt}`,
         deviceLabel: 'Rate Limit Test',
+        joinRequestId: crypto.randomUUID(),
+        deviceInstanceId: crypto.randomUUID(),
         clientIp: 'join-rate-limit-ip',
       }),
       'ROOM_NOT_FOUND',
@@ -233,6 +238,8 @@ async function run() {
       inviteCode: 'BBBBBB',
       nickname: '枚举最终',
       deviceLabel: 'Rate Limit Test',
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
       clientIp: 'join-rate-limit-ip',
     }),
     'TOO_MANY_ATTEMPTS',

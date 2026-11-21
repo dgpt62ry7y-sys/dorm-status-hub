@@ -94,6 +94,24 @@ export interface DeviceLinkResult {
   expiresAt: string
 }
 
+export interface TemporaryRecoveryCodeResult {
+  code: string
+  expiresAt: string
+  targetNickname: string
+  type: 'member_assist' | 'owner_assist'
+}
+
+export interface RecoveryAuditEntry {
+  id: string
+  eventType: 'code_generated' | 'account_recovered'
+  method: string
+  targetMemberId: string
+  targetNickname: string
+  actorNickname: string
+  generatorNicknames: string[]
+  createdAt: string
+}
+
 export interface NotificationSettings {
   serverUrl: string
   topic: string

@@ -1,4 +1,5 @@
 const path = require('node:path')
+const crypto = require('node:crypto')
 const {
   createMemoryDatabase,
   installCloudBaseMock,
@@ -221,6 +222,8 @@ async function joinRoom(room, nickname) {
       inviteCode: room.state.room.inviteCode,
       nickname,
       deviceLabel: `${nickname} Device`,
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
     }),
     `join ${nickname}`,
   )

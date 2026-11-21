@@ -52,7 +52,7 @@ async function acknowledge(): Promise<void> {
             <p class="eyebrow">房型变更</p>
             <h2 id="capacity-notice-title">{{ title }}</h2>
             <p>
-              房主已将宿舍容量调整为 {{ capacityNoticeDialog?.to }} 人，邀请码保持不变。
+              房主已将宿舍容量调整为 {{ capacityNoticeDialog?.to }} 人，宿舍分享号保持不变。
             </p>
           </div>
 

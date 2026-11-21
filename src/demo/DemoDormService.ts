@@ -513,7 +513,7 @@ export class DemoDormService {
   private regenerateInvite(payload: Record<string, unknown>): { inviteCode: string; state: DormState } {
     const member = this.requireMember(payload.memberToken)
     if (member.role !== 'owner') {
-      throw new DemoApiError('ONLY_OWNER', '只有宿舍创建者可以重新生成邀请码')
+      throw new DemoApiError('ONLY_OWNER', '只有宿舍创建者可以重新生成宿舍分享号')
     }
     this.room.inviteCode = createInviteCode()
     return { inviteCode: this.room.inviteCode, state: this.buildState(member) }

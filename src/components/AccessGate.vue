@@ -23,17 +23,24 @@ const {
   joinRoom,
   linkDevice,
   recoverAccount,
+  recoverWithAssistance,
   retryInitialize,
 } = useDormStore()
 
-type AccessMode = 'create' | 'join' | 'bind' | 'recover'
+type AccessMode = 'entry' | 'create' | 'join' | 'bind' | 'recover'
+type RecoveryMethod = 'code' | 'assistance'
+type RecoveryMode = 'member' | 'owner'
 
 const inviteFromUrl = new URLSearchParams(window.location.search).get('invite') || ''
-const mode = ref<AccessMode>(inviteFromUrl ? 'join' : 'create')
+const mode = ref<AccessMode>(inviteFromUrl ? 'entry' : 'create')
+const recoveryMethod = ref<RecoveryMethod>('code')
+const recoveryRole = ref<RecoveryMode>('member')
 const roomName = ref('')
 const nickname = ref('')
 const inviteCode = ref(inviteFromUrl.toUpperCase())
 const accountCode = ref('')
+const assistanceCodeOne = ref('')
+const assistanceCodeTwo = ref('')
 const roomCapacity = ref<RoomCapacity>(4)
 const capacityOptions: RoomCapacity[] = [4, 6]
 const creatorKey = ref('')
@@ -45,15 +52,20 @@ const submitLabel = computed(() => {
   if (mode.value === 'create') return '创建并进入宿舍'
   if (mode.value === 'join') return '加入宿舍'
   if (mode.value === 'bind') return '绑定这台设备'
-  return '恢复我的账号'
+  return recoveryMethod.value === 'code' ? '恢复我的账号' : '使用临时恢复码'
 })
 
 const intro = computed(() => {
+  if (mode.value === 'entry') {
+    return '这个链接已经带上宿舍分享号。请选择你是第一次加入，还是恢复以前使用过的账号。'
+  }
   if (mode.value === 'bind') {
     return '输入原设备生成的 8 位绑定码，让这台设备共享同一个成员身份。'
   }
   if (mode.value === 'recover') {
-    return '输入账号恢复码，在没有旧设备的情况下重新进入同一个成员身份。'
+    return recoveryMethod.value === 'code'
+      ? '输入宿舍分享号和 20 位账号恢复码，重新绑定原来的成员身份。'
+      : '输入宿舍分享号和已登录成员为你生成的一次性临时恢复码。'
   }
   return '这是一个只属于室友的共享状态空间。第一次进入后，手机会记住你的成员身份。'
 })
@@ -61,8 +73,19 @@ const intro = computed(() => {
 function switchMode(nextMode: AccessMode): void {
   mode.value = nextMode
   accountCode.value = ''
+  assistanceCodeOne.value = ''
+  assistanceCodeTwo.value = ''
+  recoveryMethod.value = 'code'
+  recoveryRole.value = 'member'
   if (nextMode !== 'create') creatorKey.value = ''
   formError.value = ''
+}
+
+function resetJoinRequestIfNeeded(): void {
+  if (mode.value !== 'join') return
+  const url = new URL(window.location.href)
+  url.searchParams.delete('invite')
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
 }
 
 async function submit(): Promise<void> {
@@ -82,11 +105,36 @@ async function submit(): Promise<void> {
       return
     }
     if (mode.value === 'join' && !inviteCode.value.trim()) {
-      formError.value = '请输入邀请码'
+      formError.value = '请输入六位宿舍分享号'
       return
     }
-  } else if (!accountCode.value.trim()) {
-    formError.value = mode.value === 'bind' ? '请输入绑定码' : '请输入恢复码'
+  } else if (mode.value === 'bind') {
+    if (!accountCode.value.trim()) {
+      formError.value = '请输入绑定码'
+      return
+    }
+  } else if (mode.value === 'recover') {
+    if (!inviteCode.value.trim()) {
+      formError.value = '请输入六位宿舍分享号'
+      return
+    }
+    if (recoveryMethod.value === 'code' && !accountCode.value.trim()) {
+      formError.value = '请输入 20 位账号恢复码'
+      return
+    }
+    if (recoveryMethod.value === 'assistance' && !assistanceCodeOne.value.trim()) {
+      formError.value = '请输入临时恢复码'
+      return
+    }
+    if (
+      recoveryMethod.value === 'assistance' &&
+      recoveryRole.value === 'owner' &&
+      !assistanceCodeTwo.value.trim()
+    ) {
+      formError.value = '房主恢复需要两个不同成员生成的临时恢复码'
+      return
+    }
+  } else {
     return
   }
 
@@ -104,8 +152,19 @@ async function submit(): Promise<void> {
     } else if (mode.value === 'bind') {
       await linkDevice(accountCode.value)
     } else {
-      await recoverAccount(accountCode.value)
+      if (recoveryMethod.value === 'code') {
+        await recoverAccount(inviteCode.value, accountCode.value)
+      } else {
+        await recoverWithAssistance(
+          inviteCode.value,
+          recoveryRole.value,
+          recoveryRole.value === 'owner'
+            ? [assistanceCodeOne.value, assistanceCodeTwo.value]
+            : [assistanceCodeOne.value],
+        )
+      }
     }
+    resetJoinRequestIfNeeded()
     const url = new URL(window.location.href)
     url.searchParams.delete('invite')
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
@@ -155,6 +214,26 @@ async function submit(): Promise<void> {
       <h1 id="access-heading">进入宿舍空间</h1>
       <p class="access-intro">{{ intro }}</p>
 
+      <section v-if="mode === 'entry'" class="access-entry">
+        <div class="access-entry__share">
+          <small>宿舍分享号</small>
+          <strong>{{ inviteCode }}</strong>
+        </div>
+        <div class="access-entry__actions">
+          <button type="button" class="button button--primary" @click="switchMode('join')">
+            <Users :size="17" aria-hidden="true" />
+            第一次加入
+          </button>
+          <button type="button" class="button button--secondary" @click="switchMode('recover')">
+            <ShieldCheck :size="17" aria-hidden="true" />
+            恢复已有账号
+          </button>
+        </div>
+        <button type="button" class="text-button" @click="switchMode('create')">
+          创建自己的新宿舍
+        </button>
+      </section>
+
       <div
         v-if="mode === 'create' || mode === 'join'"
         class="access-tabs"
@@ -183,7 +262,7 @@ async function submit(): Promise<void> {
         </button>
       </div>
 
-      <form class="access-form" @submit.prevent="submit">
+      <form v-if="mode !== 'entry'" class="access-form" @submit.prevent="submit">
         <label v-if="mode === 'create'" class="field">
           <span class="field__label">宿舍名称</span>
           <input v-model="roomName" type="text" maxlength="20" placeholder="输入宿舍名称" />
@@ -224,15 +303,15 @@ async function submit(): Promise<void> {
           />
         </label>
 
-        <label v-else-if="mode === 'join'" class="field">
+        <label v-if="mode === 'join' || mode === 'recover'" class="field">
           <span class="field__label">
             <KeyRound :size="16" aria-hidden="true" />
-            邀请码
+            宿舍分享号
           </span>
           <input
             v-model="inviteCode"
             type="text"
-            maxlength="8"
+            maxlength="6"
             autocapitalize="characters"
             autocomplete="one-time-code"
             placeholder="例如 4B7K9Q"
@@ -250,19 +329,111 @@ async function submit(): Promise<void> {
           />
         </label>
 
-        <label v-else class="field">
+        <template v-if="mode === 'recover'">
+          <div class="access-tabs" role="tablist" aria-label="账号恢复方式">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="recoveryMethod === 'code'"
+              :class="{ active: recoveryMethod === 'code' }"
+              @click="recoveryMethod = 'code'; formError = ''"
+            >
+              <KeyRound :size="15" aria-hidden="true" />
+              我有恢复码
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="recoveryMethod === 'assistance'"
+              :class="{ active: recoveryMethod === 'assistance' }"
+              @click="recoveryMethod = 'assistance'; formError = ''"
+            >
+              <Users :size="15" aria-hidden="true" />
+              我忘了恢复码
+            </button>
+          </div>
+
+          <label v-if="recoveryMethod === 'code'" class="field">
+            <span class="field__label">
+              <ShieldCheck :size="16" aria-hidden="true" />
+              账号恢复码
+            </span>
+            <input
+              v-model="accountCode"
+              type="text"
+              maxlength="29"
+              autocapitalize="characters"
+              autocomplete="one-time-code"
+              placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
+            />
+          </label>
+
+          <template v-else>
+            <div class="access-tabs" role="tablist" aria-label="恢复身份">
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="recoveryRole === 'member'"
+                :class="{ active: recoveryRole === 'member' }"
+                @click="recoveryRole = 'member'; formError = ''"
+              >
+                我是普通成员
+              </button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="recoveryRole === 'owner'"
+                :class="{ active: recoveryRole === 'owner' }"
+                @click="recoveryRole = 'owner'; formError = ''"
+              >
+                我是房主
+              </button>
+            </div>
+
+            <label class="field">
+              <span class="field__label">
+                <KeyRound :size="16" aria-hidden="true" />
+                {{ recoveryRole === 'owner' ? '房主恢复码 A' : '成员临时恢复码' }}
+              </span>
+              <input
+                v-model="assistanceCodeOne"
+                type="text"
+                maxlength="19"
+                autocapitalize="characters"
+                autocomplete="one-time-code"
+                placeholder="XXXX-XXXX-XXXX-XXXX"
+              />
+            </label>
+
+            <label v-if="recoveryRole === 'owner'" class="field">
+              <span class="field__label">
+                <KeyRound :size="16" aria-hidden="true" />
+                房主恢复码 B
+              </span>
+              <input
+                v-model="assistanceCodeTwo"
+                type="text"
+                maxlength="19"
+                autocapitalize="characters"
+                autocomplete="one-time-code"
+                placeholder="由另一名成员生成"
+              />
+            </label>
+          </template>
+        </template>
+
+        <label v-if="mode === 'bind'" class="field">
           <span class="field__label">
-            <Link2 v-if="mode === 'bind'" :size="16" aria-hidden="true" />
-            <ShieldCheck v-else :size="16" aria-hidden="true" />
-            {{ mode === 'bind' ? '设备绑定码' : '账号恢复码' }}
+            <Link2 :size="16" aria-hidden="true" />
+            设备绑定码
           </span>
           <input
             v-model="accountCode"
             type="text"
-            :maxlength="mode === 'bind' ? 12 : 29"
+            maxlength="12"
             autocapitalize="characters"
             autocomplete="one-time-code"
-            :placeholder="mode === 'bind' ? '输入 8 位绑定码' : 'XXXX-XXXX-XXXX-XXXX-XXXX'"
+            placeholder="输入 8 位绑定码"
           />
         </label>
 
@@ -270,7 +441,7 @@ async function submit(): Promise<void> {
           <button
             type="button"
             class="text-button"
-            @click="switchMode(inviteFromUrl ? 'join' : 'create')"
+            @click="switchMode(inviteFromUrl ? 'entry' : 'create')"
           >
             <ArrowLeft :size="15" aria-hidden="true" />
             返回登录
@@ -294,11 +465,17 @@ async function submit(): Promise<void> {
       </form>
 
       <div v-if="mode === 'create' || mode === 'join'" class="access-account-entry">
-        <span>已经在另一台设备登录？</span>
-        <button type="button" @click="switchMode('bind')">
-          <Link2 :size="14" aria-hidden="true" />
-          绑定已有账号
-        </button>
+        <span>以前用过 DormSync？</span>
+        <div>
+          <button type="button" @click="switchMode('recover')">
+            <ShieldCheck :size="14" aria-hidden="true" />
+            恢复账号
+          </button>
+          <button type="button" @click="switchMode('bind')">
+            <Link2 :size="14" aria-hidden="true" />
+            绑定已有设备
+          </button>
+        </div>
       </div>
 
       <p class="access-note">

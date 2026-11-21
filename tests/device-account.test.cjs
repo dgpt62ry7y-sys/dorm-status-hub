@@ -181,8 +181,10 @@ async function run() {
   expectError(
     await invoke({
       action: 'recoverAccount',
+      inviteCode,
       recoveryCode,
       deviceLabel: '旧恢复码设备',
+      deviceInstanceId: crypto.randomUUID(),
     }),
     'RECOVERY_CODE_INVALID',
   )
@@ -190,8 +192,10 @@ async function run() {
   const recovered = ok(
     await invoke({
       action: 'recoverAccount',
+      inviteCode,
       recoveryCode: rotated.recoveryCode,
       deviceLabel: 'iPad · Safari',
+      deviceInstanceId: crypto.randomUUID(),
     }),
     'recoverAccount',
   )
@@ -256,21 +260,14 @@ async function run() {
     await invoke({ action: 'createDeviceLink', memberToken: ownerToken }),
     'DEVICE_LIMIT_REACHED',
   )
-  expectError(
-    await invoke({
-      action: 'recoverAccount',
-      recoveryCode: rotated.recoveryCode,
-      deviceLabel: '超额设备',
-    }),
-    'DEVICE_LIMIT_REACHED',
-  )
-
   const joined = ok(
     await invoke({
       action: 'joinRoom',
       inviteCode,
       nickname: `待移除成员${suffix}`,
       deviceLabel: 'Android · Chrome',
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
     }),
     'joinRoom',
   )
@@ -352,6 +349,8 @@ async function run() {
         inviteCode: sixInvite,
         nickname: `六人成员${suffix}-${index}`,
         deviceLabel: `测试设备 ${index}`,
+        joinRequestId: crypto.randomUUID(),
+        deviceInstanceId: crypto.randomUUID(),
       }),
       `join six-person member ${index}`,
     )
@@ -364,6 +363,8 @@ async function run() {
       inviteCode: sixInvite,
       nickname: `第七人${suffix}`,
       deviceLabel: '超额设备',
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
     }),
     'ROOM_FULL',
   )

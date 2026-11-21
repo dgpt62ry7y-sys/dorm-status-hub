@@ -121,6 +121,8 @@ async function joinRoom(room, nickname) {
       inviteCode: room.room?.inviteCode || room.inviteCode,
       nickname,
       deviceLabel: `${nickname} Device`,
+      joinRequestId: crypto.randomUUID(),
+      deviceInstanceId: crypto.randomUUID(),
     }),
     `join ${nickname}`,
   )

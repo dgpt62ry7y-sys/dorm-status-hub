@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
 
         <RouterLink v-if="!demoMode" to="/members" class="invite-nudge">
           <span>
-            <small>邀请码</small>
+            <small>宿舍分享号</small>
             <strong>{{ state.room.inviteCode }}</strong>
           </span>
           <span class="invite-nudge__action">
