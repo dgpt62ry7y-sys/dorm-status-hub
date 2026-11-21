@@ -2171,6 +2171,32 @@ textarea:focus-visible {
   max-inline-size: 100%;
 }
 
+.time-input-shell {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e5e5e1;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.time-input-shell:focus-within {
+  border-color: #17181a;
+  box-shadow: 0 0 0 3px rgba(23, 24, 26, 0.08);
+}
+
+.time-input-shell input[type="time"],
+.time-input-shell input[type="time"]:focus {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .field textarea {
   min-height: 92px;
   padding: 12px 13px;

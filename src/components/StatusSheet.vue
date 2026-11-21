@@ -141,11 +141,13 @@ useDialogScrollLock(toRef(props, 'open'))
                 }}
                 <em v-if="requiresTime">必填</em>
               </span>
-              <input
-                v-model="time"
-                type="time"
-                @change="timeTouched = true"
-              />
+              <span class="time-input-shell">
+                <input
+                  v-model="time"
+                  type="time"
+                  @change="timeTouched = true"
+                />
+              </span>
               <span v-if="isNextDay" class="field__hint">
                 <Moon :size="14" stroke-width="1.8" aria-hidden="true" />
                 所选时间早于现在，将按明天 {{ time }} 计算。
