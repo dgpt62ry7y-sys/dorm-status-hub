@@ -25,6 +25,7 @@ const TOKEN_KEY = 'dormsync:member-token:v1'
 const NOTIFICATION_TOPIC_SEEN_KEY = 'dormsync:notification-topic-seen:v1'
 const LOCAL_RECOVERY_CODE_KEY = 'dormsync:local-test-recovery-code:v1'
 const POLL_INTERVAL_MS = 5000
+const REALTIME_REFRESH_DEBOUNCE_MS = 180
 
 function createEmptyState(): DormState {
   return {
@@ -62,16 +63,28 @@ const capacityNoticeDialog = ref<CapacityNotice | null>(null)
 const releaseNoticeDialog = ref<ReleaseNotice | null>(null)
 const initialServerVersion = ref('')
 const notificationTopicUpdateAvailable = ref(false)
+const realtimeConnected = ref(false)
 
 let pollTimer: number | undefined
+let realtimeRefreshTimer: number | undefined
+let eventSource: EventSource | null = null
+let eventSourceUrl = ''
+let realtimeReconnectRefreshPending = false
 let refreshInFlight: Promise<void> | null = null
+let refreshQueued = false
+let queuedClaimCapacityNotice = false
+let queuedClaimReleaseNotice = false
 let devicesRequestInFlight: Promise<void> | null = null
 let lifecycleBound = false
 let initialized = false
 let lastFocusRetryAt = 0
 
 function applyState(next: DormState): void {
+  const previousRealtime = state.room.realtime
   state.room = next.room
+  if (next.room.realtime === undefined) {
+    state.room.realtime = previousRealtime
+  }
   const topicUpdatedAt = next.room.notificationTopicUpdatedAt
   const seenTopicUpdatedAt = localStorage.getItem(NOTIFICATION_TOPIC_SEEN_KEY)
   const topicTimestamp = topicUpdatedAt ? Date.parse(topicUpdatedAt) : Number.NaN
@@ -93,6 +106,7 @@ function applyState(next: DormState): void {
   lastSyncedAt.value = new Date().toISOString()
   if (next.capacityNotice) capacityNoticeDialog.value = next.capacityNotice
   if (next.releaseNotice) releaseNoticeDialog.value = next.releaseNotice
+  if (phase.value === 'ready') reconcileRealtime()
 }
 
 function saveSession(token: string, next: DormState): void {
@@ -101,7 +115,10 @@ function saveSession(token: string, next: DormState): void {
   applyState(next)
   phase.value = 'ready'
   actionError.value = ''
-  startPolling()
+  startSync()
+  window.setTimeout(() => {
+    void refresh(true)
+  }, 0)
 }
 
 function clearSession(): void {
@@ -116,7 +133,10 @@ function clearSession(): void {
   releaseNoticeDialog.value = null
   initialServerVersion.value = ''
   notificationTopicUpdateAvailable.value = false
-  stopPolling()
+  refreshQueued = false
+  queuedClaimCapacityNotice = false
+  queuedClaimReleaseNotice = false
+  stopSync()
 }
 
 function formatRecoveryCode(code: string): string {
@@ -153,18 +173,120 @@ function compareVersions(left: string, right: string): number {
   return 0
 }
 
-function startPolling(): void {
-  stopPolling()
+function startFallbackPolling(): void {
+  if (pollTimer || phase.value !== 'ready') return
   pollTimer = window.setInterval(() => {
-    if (document.visibilityState === 'visible' && phase.value === 'ready') {
+    if (
+      document.visibilityState === 'visible' &&
+      phase.value === 'ready' &&
+      !realtimeConnected.value
+    ) {
       void refresh(true)
     }
   }, POLL_INTERVAL_MS)
 }
 
-function stopPolling(): void {
+function stopFallbackPolling(): void {
   if (pollTimer) window.clearInterval(pollTimer)
   pollTimer = undefined
+}
+
+function closeRealtime(): void {
+  if (eventSource) eventSource.close()
+  eventSource = null
+  eventSourceUrl = ''
+  realtimeConnected.value = false
+  if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
+  realtimeRefreshTimer = undefined
+}
+
+function stopSync(): void {
+  stopFallbackPolling()
+  closeRealtime()
+  realtimeReconnectRefreshPending = false
+}
+
+function realtimeStreamUrl(): string {
+  const realtime = state.room.realtime
+  if (!realtime?.serverUrl || !realtime.topic) return ''
+  return `${realtime.serverUrl.replace(/\/+$/, '')}/${encodeURIComponent(realtime.topic)}/sse`
+}
+
+function scheduleRealtimeRefresh(): void {
+  if (realtimeRefreshTimer) window.clearTimeout(realtimeRefreshTimer)
+  realtimeRefreshTimer = window.setTimeout(() => {
+    realtimeRefreshTimer = undefined
+    if (document.visibilityState === 'visible' && phase.value === 'ready') {
+      void refresh(true)
+    }
+  }, REALTIME_REFRESH_DEBOUNCE_MS)
+}
+
+function handleRealtimeMessage(event: MessageEvent<string>): void {
+  try {
+    const payload = JSON.parse(event.data)
+    if (payload?.event && payload.event !== 'message') return
+  } catch {
+    // A malformed event is still a useful refresh signal.
+  }
+  scheduleRealtimeRefresh()
+}
+
+function reconcileRealtime(): void {
+  if (__DEMO_MODE__ || phase.value !== 'ready' || !memberToken.value) {
+    stopSync()
+    return
+  }
+
+  const url = realtimeStreamUrl()
+  if (
+    !url ||
+    typeof EventSource === 'undefined' ||
+    !navigator.onLine ||
+    document.visibilityState !== 'visible'
+  ) {
+    closeRealtime()
+    if (url && typeof EventSource !== 'undefined' && navigator.onLine) {
+      startFallbackPolling()
+    }
+    return
+  }
+
+  if (
+    eventSource &&
+    eventSourceUrl === url &&
+    eventSource.readyState !== EventSource.CLOSED
+  ) {
+    if (!realtimeConnected.value) startFallbackPolling()
+    return
+  }
+
+  closeRealtime()
+  eventSourceUrl = url
+  const source = new EventSource(url)
+  eventSource = source
+  startFallbackPolling()
+
+  source.onopen = () => {
+    if (eventSource !== source) return
+    realtimeConnected.value = true
+    stopFallbackPolling()
+    if (realtimeReconnectRefreshPending) {
+      realtimeReconnectRefreshPending = false
+      scheduleRealtimeRefresh()
+    }
+  }
+  source.onmessage = handleRealtimeMessage
+  source.onerror = () => {
+    if (eventSource !== source) return
+    realtimeConnected.value = false
+    realtimeReconnectRefreshPending = true
+    startFallbackPolling()
+  }
+}
+
+function startSync(): void {
+  reconcileRealtime()
 }
 
 function bindLifecycle(): void {
@@ -174,15 +296,22 @@ function bindLifecycle(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && memberToken.value) {
       void refresh(true, true, true)
+      reconcileRealtime()
+    } else if (document.visibilityState !== 'visible') {
+      closeRealtime()
     }
   })
 
   window.addEventListener('online', () => {
     isOnline.value = true
-    if (memberToken.value) void refresh(true, true, true)
+    if (memberToken.value) {
+      void refresh(true, true, true)
+      reconcileRealtime()
+    }
   })
   window.addEventListener('offline', () => {
     isOnline.value = false
+    closeRealtime()
   })
   window.addEventListener('focus', () => {
     if (
@@ -228,7 +357,12 @@ async function refresh(
   claimReleaseNotice = false,
 ): Promise<void> {
   if (!memberToken.value || phase.value !== 'ready') return
-  if (refreshInFlight) return refreshInFlight
+  if (refreshInFlight) {
+    refreshQueued = true
+    queuedClaimCapacityNotice ||= claimCapacityNotice
+    queuedClaimReleaseNotice ||= claimReleaseNotice
+    return refreshInFlight
+  }
 
   isSyncing.value = true
   refreshInFlight = (async () => {
@@ -255,6 +389,16 @@ async function refresh(
     } finally {
       isSyncing.value = false
       refreshInFlight = null
+      if (refreshQueued && memberToken.value && phase.value === 'ready') {
+        const nextClaimCapacity = queuedClaimCapacityNotice
+        const nextClaimRelease = queuedClaimReleaseNotice
+        refreshQueued = false
+        queuedClaimCapacityNotice = false
+        queuedClaimReleaseNotice = false
+        window.setTimeout(() => {
+          void refresh(true, nextClaimCapacity, nextClaimRelease)
+        }, 0)
+      }
     }
   })()
 
@@ -277,7 +421,7 @@ async function initialize(): Promise<void> {
     initialServerVersion.value = next.serverVersion || ''
     phase.value = 'ready'
     isOnline.value = true
-    startPolling()
+    startSync()
     const pendingRecoveryCode = localStorage.getItem(LOCAL_RECOVERY_CODE_KEY)
     if (pendingRecoveryCode) {
       localStorage.removeItem(LOCAL_RECOVERY_CODE_KEY)
@@ -303,7 +447,7 @@ async function retryInitialize(): Promise<void> {
 }
 
 async function activateSessionToken(token: string): Promise<void> {
-  stopPolling()
+  stopSync()
   memberToken.value = token
   localStorage.setItem(TOKEN_KEY, token)
   devices.value = []
@@ -491,6 +635,11 @@ async function getNotificationSettings() {
   const settings = await cloudDormApi.getNotificationSettings(memberToken.value)
   state.room.notificationTopicUpdatedAt = settings.topicUpdatedAt
   state.room.notificationTopicNeedsRotation = settings.topicNeedsRotation
+  state.room.realtime = {
+    serverUrl: settings.serverUrl,
+    topic: settings.topic,
+  }
+  reconcileRealtime()
   return settings
 }
 
@@ -498,6 +647,11 @@ async function rotateNotificationTopic() {
   const settings = await cloudDormApi.rotateNotificationTopic(memberToken.value)
   state.room.notificationTopicUpdatedAt = settings.topicUpdatedAt
   state.room.notificationTopicNeedsRotation = settings.topicNeedsRotation
+  state.room.realtime = {
+    serverUrl: settings.serverUrl,
+    topic: settings.topic,
+  }
+  reconcileRealtime()
   localStorage.setItem(
     NOTIFICATION_TOPIC_SEEN_KEY,
     settings.topicUpdatedAt || new Date().toISOString(),
@@ -597,6 +751,7 @@ export function useDormStore() {
     capacityNoticeVisible,
     updateAvailable,
     notificationTopicUpdateAvailable,
+    realtimeConnected,
     currentMember,
     memberCount,
     availableSeats,

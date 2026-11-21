@@ -49,6 +49,12 @@ export interface DormState {
     memberCount?: number
     notificationTopicUpdatedAt?: string | null
     notificationTopicNeedsRotation?: boolean
+    realtime?:
+      | {
+          serverUrl: string
+          topic: string
+        }
+      | null
   }
   members: Member[]
   statuses: StatusRecord[]

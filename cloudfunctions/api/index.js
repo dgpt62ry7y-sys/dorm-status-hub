@@ -28,6 +28,7 @@ const BARK_APP_STORE_URL = 'https://apps.apple.com/app/id1403753865'
 const BARK_TIMEOUT_MS = 4_000
 const BARK_TEST_COOLDOWN_MS = 60_000
 const MAX_BARK_DEVICES_PER_MEMBER = 5
+const PRESENCE_UPDATE_INTERVAL_MS = 5 * 60 * 1000
 const BARK_ENCRYPTION_KEY_ENV = 'DORMSYNC_BARK_ENCRYPTION_KEY'
 const BARK_ENCRYPTION_VERSION = 'v1'
 const BARK_ENCRYPTION_AAD = 'dormsync:bark-subscription:v1'
@@ -800,6 +801,32 @@ async function getActiveDeviceSessions(memberId, limit = MAX_DEVICES + 1) {
   return result.data
 }
 
+function isPresenceStale(lastSeenAt, now = Date.now()) {
+  const seenAt = Date.parse(lastSeenAt || '')
+  return !Number.isFinite(seenAt) || now - seenAt >= PRESENCE_UPDATE_INTERVAL_MS
+}
+
+async function touchAuthenticatedPresence(member, session) {
+  const now = Date.now()
+  const seenAt = new Date(now).toISOString()
+  const updates = []
+  if (isPresenceStale(member.lastSeenAt, now)) {
+    updates.push(
+      db.collection('members').doc(member._id).update({
+        lastSeenAt: seenAt,
+      }),
+    )
+  }
+  if (session?._id && isPresenceStale(session.lastSeenAt, now)) {
+    updates.push(
+      db.collection('deviceSessions').doc(session._id).update({
+        lastSeenAt: seenAt,
+      }),
+    )
+  }
+  if (updates.length > 0) await Promise.all(updates)
+}
+
 async function revokeMemberSessions(memberId) {
   const sessions = await getActiveDeviceSessions(memberId)
   const revokedAt = nowIso()
@@ -854,9 +881,6 @@ async function findAuthenticatedContext(token) {
       })
       return null
     }
-    await db.collection('deviceSessions').doc(session._id).update({
-      lastSeenAt: nowIso(),
-    })
     return { member, session }
   }
 
@@ -1061,6 +1085,7 @@ async function buildState(
   currentDeviceId = '',
   claimCapacityNotice = false,
   claimReleaseNotice = false,
+  includeRealtime = false,
 ) {
   const room = await getRoom(member.roomId)
   if (!room || room.closed) return null
@@ -1084,21 +1109,6 @@ async function buildState(
   const statuses = (await expireStatuses(rawStatuses)).filter((item) =>
     activeMemberIds.has(item.memberId),
   )
-  const seenAt = nowIso()
-  const seenUpdates = [
-    db.collection('members').doc(member._id).update({
-      lastSeenAt: seenAt,
-    }),
-  ]
-  if (currentDeviceId) {
-    seenUpdates.push(
-      db.collection('deviceSessions').doc(currentDeviceId).update({
-        lastSeenAt: seenAt,
-      }),
-    )
-  }
-  await Promise.all(seenUpdates)
-
   return {
     room: {
       id: room._id,
@@ -1111,6 +1121,14 @@ async function buildState(
       memberCount: members.length,
       notificationTopicUpdatedAt: room.ntfyTopicUpdatedAt || null,
       notificationTopicNeedsRotation: Boolean(room.ntfyTopicNeedsRotation),
+      realtime: includeRealtime
+        ? validNtfyTopic(room.ntfyTopic)
+          ? {
+              serverUrl: ntfyPublicServerUrl(),
+              topic: room.ntfyTopic,
+            }
+          : null
+        : undefined,
     },
     currentMemberId: member._id,
     currentDeviceId,
@@ -2246,6 +2264,7 @@ async function dispatch(event = {}) {
     const context = await findAuthenticatedContext(event.memberToken)
     if (!context) return fail('AUTH_REQUIRED', '登录状态已失效，请重新绑定或恢复账号')
     const { member, session } = context
+    await touchAuthenticatedPresence(member, session)
     const verificationBlock = await roomVerificationGate(member, event.action)
     if (verificationBlock) return verificationBlock
 
@@ -2255,6 +2274,7 @@ async function dispatch(event = {}) {
         session._id,
         Boolean(event.claimCapacityNotice),
         Boolean(event.claimReleaseNotice),
+        true,
       )
       return state ? ok(state) : fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
     }
@@ -2345,6 +2365,11 @@ function requestClientIp(event) {
 exports.__testNotificationFormatting = {
   buildStatusNotification,
   notificationSafeText,
+}
+
+exports.__testPresence = {
+  isPresenceStale,
+  intervalMs: PRESENCE_UPDATE_INTERVAL_MS,
 }
 
 exports.cleanup = async () => {

@@ -43,7 +43,7 @@
         {
           "name": "hourly-room-cleanup",
           "type": "timer",
-          "config": "0 0 * * * * *"
+          "config": "0 10 0,6,12,18 * * * *"
         }
       ]
     }
