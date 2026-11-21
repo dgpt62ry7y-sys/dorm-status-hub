@@ -47,6 +47,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `createMemberRecoveryCode` 由房主为指定普通成员生成一次性临时恢复码。
 - `createOwnerRecoveryCode` 由普通成员为房主生成一次性临时恢复码。
 - `listRecoveryAudit` 只向房主返回最近的恢复记录，不返回恢复码、令牌或设备凭证。
+- `adminCreateOwnerRecoveryCode` 由本机管理站调用，同时验证管理密钥和创建密钥后生成 10 分钟一次性房主救援码。
 - `listDevices` 和 `revokeDevice` 用于设备管理。
 - `rotateRecoveryCode` 重新生成恢复码并立即使旧码失效。
 - `updateRoomCapacity` 由当前房主在四人寝与六人寝之间切换容量。
@@ -60,7 +61,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `registerBarkDevice` 校验 Bark Key、先发送测试通知，成功后加密保存。
 - `testBarkNotification` 测试当前成员自己的已登记 Bark 设备。
 - `removeBarkDevice` 只允许删除当前成员自己的 Bark 设备。
-- `adminListRooms` 为本地只读管理站提供寝室级摘要，需要独立管理密钥。
+- `adminListRooms` 为本机管理站提供寝室级摘要，需要独立管理密钥。
 
 ## 权限
 
@@ -119,7 +120,7 @@ Topic 在所选 ntfy 服务上是共享秘密，不提供真正的访问控制�
 
 ## 本地工具
 
-- `admin/` 是仅在本机运行的只读管理站，不进入正式静态网站构建。
+- `admin/` 是仅在本机运行的管理站，默认只读取寝室摘要；唯一写操作是验证双密钥后生成短期房主救援码。
 - `npm run dev:test` 使用内存数据库启动六账号测试环境。
 - 六账号测试环境把 ntfy 和 Bark 请求转发到本地收件箱，不访问真实推送服务。
 - 测试控制接口只存在于本地测试服务，不进入 CloudBase 云函数。

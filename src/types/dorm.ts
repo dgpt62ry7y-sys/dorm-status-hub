@@ -98,7 +98,7 @@ export interface TemporaryRecoveryCodeResult {
   code: string
   expiresAt: string
   targetNickname: string
-  type: 'member_assist' | 'owner_assist'
+  type: 'member_assist' | 'owner_assist' | 'owner_admin_rescue'
 }
 
 export interface RecoveryAuditEntry {

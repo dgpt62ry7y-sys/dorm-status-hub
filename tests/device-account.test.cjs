@@ -1,4 +1,5 @@
 const crypto = require('node:crypto')
+const fs = require('node:fs')
 const path = require('node:path')
 const {
   createMemoryDatabase,
@@ -41,6 +42,14 @@ function hash(value) {
 }
 
 async function run() {
+  const storeSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'composables', 'useDormStore.ts'),
+    'utf8',
+  )
+  if (!storeSource.includes('if (storedToken === failedToken) localStorage.removeItem(TOKEN_KEY)')) {
+    throw new Error('Cross-tab session cleanup guard is missing')
+  }
+
   const suffix = String(Date.now()).slice(-6)
   const created = ok(
     await invoke({
@@ -575,6 +584,7 @@ async function run() {
         inviteStableAcrossCapacityChange: true,
         latestCapacityNoticeOnly: true,
         legacyTokenMigration: true,
+        crossTabSessionCleanupGuard: true,
       },
       null,
       2,

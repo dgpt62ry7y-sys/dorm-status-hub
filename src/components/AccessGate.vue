@@ -29,7 +29,7 @@ const {
 
 type AccessMode = 'entry' | 'create' | 'join' | 'bind' | 'recover'
 type RecoveryMethod = 'code' | 'assistance'
-type RecoveryMode = 'member' | 'owner'
+type RecoveryMode = 'member' | 'owner' | 'admin'
 
 const inviteFromUrl = new URLSearchParams(window.location.search).get('invite') || ''
 const mode = ref<AccessMode>(inviteFromUrl ? 'entry' : 'create')
@@ -52,7 +52,8 @@ const submitLabel = computed(() => {
   if (mode.value === 'create') return '创建并进入宿舍'
   if (mode.value === 'join') return '加入宿舍'
   if (mode.value === 'bind') return '绑定这台设备'
-  return recoveryMethod.value === 'code' ? '恢复我的账号' : '使用临时恢复码'
+  if (recoveryMethod.value === 'code') return '恢复我的账号'
+  return recoveryRole.value === 'admin' ? '使用房主救援码' : '使用临时恢复码'
 })
 
 const intro = computed(() => {
@@ -65,7 +66,9 @@ const intro = computed(() => {
   if (mode.value === 'recover') {
     return recoveryMethod.value === 'code'
       ? '输入宿舍分享号和 20 位账号恢复码，重新绑定原来的成员身份。'
-      : '输入宿舍分享号和已登录成员为你生成的一次性临时恢复码。'
+      : recoveryRole.value === 'admin'
+        ? '输入宿舍分享号和本地管理台生成的房主救援码。救援码 10 分钟内有效，只能使用一次。'
+        : '输入宿舍分享号和已登录成员为你生成的一次性临时恢复码。'
   }
   return '这是一个只属于室友的共享状态空间。第一次进入后，手机会记住你的成员身份。'
 })
@@ -369,7 +372,11 @@ async function submit(): Promise<void> {
           </label>
 
           <template v-else>
-            <div class="access-tabs" role="tablist" aria-label="恢复身份">
+            <div
+              class="access-tabs access-tabs--three"
+              role="tablist"
+              aria-label="恢复身份"
+            >
               <button
                 type="button"
                 role="tab"
@@ -388,12 +395,27 @@ async function submit(): Promise<void> {
               >
                 我是房主
               </button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="recoveryRole === 'admin'"
+                :class="{ active: recoveryRole === 'admin' }"
+                @click="recoveryRole = 'admin'; formError = ''"
+              >
+                本地救援
+              </button>
             </div>
 
             <label class="field">
               <span class="field__label">
                 <KeyRound :size="16" aria-hidden="true" />
-                {{ recoveryRole === 'owner' ? '房主恢复码 A' : '成员临时恢复码' }}
+                {{
+                  recoveryRole === 'owner'
+                    ? '房主恢复码 A'
+                    : recoveryRole === 'admin'
+                      ? '房主救援码'
+                      : '成员临时恢复码'
+                }}
               </span>
               <input
                 v-model="assistanceCodeOne"
@@ -404,6 +426,12 @@ async function submit(): Promise<void> {
                 placeholder="XXXX-XXXX-XXXX-XXXX"
               />
             </label>
+
+            <p v-if="recoveryRole === 'admin'" class="access-recovery-help">
+              请先在电脑上运行
+              <code>启动本地工具.bat</code>
+              ，选择只读管理站，验证后为对应宿舍生成救援码。
+            </p>
 
             <label v-if="recoveryRole === 'owner'" class="field">
               <span class="field__label">

@@ -89,7 +89,7 @@ npm run deploy:web
 | `VITE_CLOUDBASE_ENV_ID` | 前端 CloudBase 环境 ID | 是 |
 | `VITE_DORMSYNC_API_URL` | 前端访问的 HTTPS API 网关地址 | 是 |
 | `DORMSYNC_CREATOR_KEY` | 创建宿舍时的授权密钥 | 是 |
-| `DORMSYNC_ADMIN_KEY` | 本地只读管理站密钥 | 是 |
+| `DORMSYNC_ADMIN_KEY` | 本地管理站读取与房主救援验证密钥 | 是 |
 | `DORMSYNC_BARK_ENCRYPTION_KEY` | AES-256-GCM 加密 Bark Key，必须为 64 位十六进制 | 是 |
 | `DORMSYNC_NTFY_SERVER` | 云函数使用的 ntfy 服务地址 | 否 |
 | `DORMSYNC_NTFY_PUBLIC_URL` | 设置页展示和深链使用的公开 ntfy 地址 | 否 |
@@ -129,7 +129,7 @@ npm run check:release
 npm run build
 ```
 
-本地只读管理站：
+本机管理站：
 
 ```bash
 npm run admin
@@ -164,7 +164,7 @@ npm run dev:test
 
 ```text
 src/                  Vue 前端
-admin/                本机只读管理站
+admin/                本机管理站与受控房主救援
 cloudfunctions/api/   云函数与版本数据
 docs/                 架构、部署、许可和设计文档
 tests/                自动化测试与本地测试服务

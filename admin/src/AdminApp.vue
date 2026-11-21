@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  Check,
+  Copy,
   DoorOpen,
+  KeyRound,
   LoaderCircle,
   LockKeyhole,
   RefreshCw,
   Search,
+  ShieldAlert,
   ShieldCheck,
+  X,
 } from '@lucide/vue'
 
 interface AdminRoom {
@@ -24,6 +29,13 @@ interface AdminRoom {
   closed: boolean
 }
 
+interface AdminRescueResult {
+  code: string
+  expiresAt: string
+  roomName: string
+  ownerNickname: string
+}
+
 const apiUrl = import.meta.env.VITE_DORMSYNC_API_URL
 const storedKey = sessionStorage.getItem('dormsync:admin-key') || ''
 const adminKey = ref(storedKey)
@@ -31,6 +43,12 @@ const rooms = ref<AdminRoom[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
 const query = ref('')
+const rescueRoom = ref<AdminRoom | null>(null)
+const rescueCreatorKey = ref('')
+const rescueLoading = ref(false)
+const rescueError = ref('')
+const rescueResult = ref<AdminRescueResult | null>(null)
+const rescueCopied = ref(false)
 
 const filteredRooms = computed(() => {
   const keyword = query.value.trim().toLowerCase()
@@ -57,6 +75,10 @@ function formatTime(value: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function formatRecoveryCode(value: string): string {
+  return value.match(/.{1,4}/g)?.join('-') || value
 }
 
 async function loadRooms(): Promise<void> {
@@ -93,10 +115,97 @@ function logout(): void {
   adminKey.value = ''
   rooms.value = []
   errorMessage.value = ''
+  closeRescue()
+}
+
+function openRescue(room: AdminRoom): void {
+  if (room.closed || !room.ownerNickname) return
+  rescueRoom.value = room
+  rescueCreatorKey.value = ''
+  rescueError.value = ''
+  rescueResult.value = null
+  rescueCopied.value = false
+}
+
+function closeRescue(): void {
+  if (rescueLoading.value) return
+  rescueRoom.value = null
+  rescueCreatorKey.value = ''
+  rescueError.value = ''
+  rescueResult.value = null
+  rescueCopied.value = false
+}
+
+async function createRescueCode(): Promise<void> {
+  const room = rescueRoom.value
+  if (!room) return
+  if (!rescueCreatorKey.value.trim()) {
+    rescueError.value = '请输入寝室创建密钥'
+    return
+  }
+
+  rescueLoading.value = true
+  rescueError.value = ''
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'adminCreateOwnerRecoveryCode',
+        adminKey: adminKey.value,
+        creatorKey: rescueCreatorKey.value,
+        roomId: room.id,
+      }),
+    })
+    const result = await response.json()
+    if (!result.ok) throw new Error(result.error.message)
+    rescueResult.value = {
+      code: result.data.code,
+      expiresAt: result.data.expiresAt,
+      roomName: result.data.roomName,
+      ownerNickname: result.data.ownerNickname,
+    }
+    rescueCreatorKey.value = ''
+  } catch (error) {
+    rescueError.value = error instanceof Error ? error.message : '救援码生成失败'
+  } finally {
+    rescueLoading.value = false
+  }
+}
+
+async function copyRescueCode(): Promise<void> {
+  const code = rescueResult.value?.code
+  if (!code) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(formatRecoveryCode(code))
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = formatRecoveryCode(code)
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+  rescueCopied.value = true
+  window.setTimeout(() => {
+    rescueCopied.value = false
+  }, 1600)
+}
+
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && rescueRoom.value) closeRescue()
 }
 
 onMounted(() => {
   if (storedKey) void loadRooms()
+  document.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -104,13 +213,13 @@ onMounted(() => {
   <main class="admin-shell">
     <header class="admin-header">
       <div>
-        <p class="admin-eyebrow">LOCAL ADMIN / READ ONLY</p>
+        <p class="admin-eyebrow">LOCAL ADMIN / CONTROLLED ACCESS</p>
         <h1>寝室管理台</h1>
-        <p>仅在本机运行，只读取正式环境的寝室级状态。</p>
+        <p>仅在本机运行，读取寝室摘要，并可为房主生成一次性账号救援码。</p>
       </div>
       <span class="admin-secure">
         <ShieldCheck :size="17" aria-hidden="true" />
-        本地只读
+        本地安全操作
       </span>
     </header>
 
@@ -173,6 +282,7 @@ onMounted(() => {
               <th>验证</th>
               <th>最近活动</th>
               <th>创建时间</th>
+              <th>账号救援</th>
             </tr>
           </thead>
           <tbody>
@@ -200,6 +310,17 @@ onMounted(() => {
               </td>
               <td>{{ formatTime(room.lastActiveAt) }}</td>
               <td>{{ formatTime(room.createdAt) }}</td>
+              <td>
+                <button
+                  type="button"
+                  class="admin-rescue-button"
+                  :disabled="room.closed || !room.ownerNickname"
+                  @click="openRescue(room)"
+                >
+                  <KeyRound :size="14" aria-hidden="true" />
+                  生成救援码
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -210,5 +331,123 @@ onMounted(() => {
         没有匹配的寝室
       </p>
     </template>
+
+    <Teleport to="body">
+      <Transition name="admin-dialog">
+        <div
+          v-if="rescueRoom"
+          class="admin-dialog-layer"
+          role="presentation"
+          @click.self="closeRescue"
+        >
+          <section
+            class="admin-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-rescue-title"
+          >
+            <button
+              type="button"
+              class="admin-dialog-close"
+              aria-label="关闭"
+              :disabled="rescueLoading"
+              @click="closeRescue"
+            >
+              <X :size="18" aria-hidden="true" />
+            </button>
+
+            <div class="admin-dialog-heading">
+              <span class="admin-dialog-icon">
+                <KeyRound :size="21" aria-hidden="true" />
+              </span>
+              <div>
+                <p>ACCOUNT RESCUE</p>
+                <h2 id="admin-rescue-title">
+                  {{ rescueResult ? '房主救援码已生成' : `救援「${rescueRoom.name}」房主` }}
+                </h2>
+              </div>
+            </div>
+
+            <template v-if="!rescueResult">
+              <p class="admin-dialog-copy">
+                该操作不会显示或导出长期恢复码，只会生成一个新的 10 分钟一次性救援码。
+                需要同时验证当前管理密钥和寝室创建密钥。
+              </p>
+
+              <div class="admin-rescue-target">
+                <span>房主</span>
+                <strong>{{ rescueRoom.ownerNickname }}</strong>
+                <small>{{ rescueRoom.name }} · {{ rescueRoom.memberCount }} 名成员</small>
+              </div>
+
+              <label class="admin-dialog-field">
+                <span>寝室创建密钥</span>
+                <input
+                  v-model="rescueCreatorKey"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="仅用于本次验证，不保存"
+                  @keyup.enter="createRescueCode"
+                />
+              </label>
+
+              <div class="admin-dialog-warning">
+                <ShieldAlert :size="17" aria-hidden="true" />
+                <span>救援码只能恢复房主账号，不能恢复普通成员；提交后请立即使用。</span>
+              </div>
+
+              <p v-if="rescueError" class="admin-dialog-error">{{ rescueError }}</p>
+
+              <div class="admin-dialog-actions">
+                <button type="button" class="admin-dialog-cancel" @click="closeRescue">
+                  取消
+                </button>
+                <button
+                  type="button"
+                  class="admin-dialog-confirm"
+                  :disabled="rescueLoading"
+                  @click="createRescueCode"
+                >
+                  <LoaderCircle
+                    v-if="rescueLoading"
+                    class="spin"
+                    :size="16"
+                    aria-hidden="true"
+                  />
+                  <KeyRound v-else :size="16" aria-hidden="true" />
+                  {{ rescueLoading ? '正在验证并生成…' : '生成一次性救援码' }}
+                </button>
+              </div>
+            </template>
+
+            <template v-else>
+              <p class="admin-dialog-copy">
+                已为「{{ rescueResult.roomName }}」房主
+                {{ rescueResult.ownerNickname }} 生成救援码。请回到网站恢复账号页面使用。
+              </p>
+
+              <div class="admin-rescue-code">
+                <code>{{ formatRecoveryCode(rescueResult.code) }}</code>
+                <button type="button" @click="copyRescueCode">
+                  <Check v-if="rescueCopied" :size="16" aria-hidden="true" />
+                  <Copy v-else :size="16" aria-hidden="true" />
+                  {{ rescueCopied ? '已复制' : '复制' }}
+                </button>
+              </div>
+
+              <div class="admin-rescue-expiry">
+                <span>有效期至</span>
+                <strong>{{ formatTime(rescueResult.expiresAt) }}</strong>
+                <small>只能使用一次，关闭页面后不会再次显示。</small>
+              </div>
+
+              <button type="button" class="admin-dialog-confirm admin-dialog-finish" @click="closeRescue">
+                我已保存，关闭
+              </button>
+            </template>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
   </main>
 </template>

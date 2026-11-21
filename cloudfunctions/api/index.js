@@ -18,6 +18,7 @@ const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
   ['recoverAccount', { scope: 'recover-account', maxAttempts: 10 }],
   ['recoverWithAssistance', { scope: 'recover-with-assistance', maxAttempts: 10 }],
+  ['adminCreateOwnerRecoveryCode', { scope: 'admin-owner-recovery', maxAttempts: 5 }],
 ])
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
@@ -1835,7 +1836,8 @@ async function handleRecoverWithAssistance(event) {
   const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
   const rawCodes = Array.isArray(event.recoveryCodes) ? event.recoveryCodes : []
   const codes = rawCodes.map(normalizeSecret)
-  const expectedCount = mode === 'owner' ? 2 : mode === 'member' ? 1 : 0
+  const expectedCount =
+    mode === 'owner' ? 2 : mode === 'member' || mode === 'admin' ? 1 : 0
   if (
     !room ||
     !deviceInstanceId ||
@@ -1847,7 +1849,12 @@ async function handleRecoverWithAssistance(event) {
     return fail('RECOVERY_CODE_INVALID', '临时恢复码无效，请检查后重试')
   }
 
-  const type = mode === 'owner' ? 'owner_assist' : 'member_assist'
+  const type =
+    mode === 'owner'
+      ? 'owner_assist'
+      : mode === 'admin'
+        ? 'owner_admin_rescue'
+        : 'member_assist'
   const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
   const codeDocuments = await Promise.all(
     codes.map((code) => getDocument('temporaryRecoveryCodes', temporaryRecoveryDocumentId(code))),
@@ -1874,22 +1881,41 @@ async function handleRecoverWithAssistance(event) {
   }
   const generatorIds = codeDocuments.map((item) => item.generatorMemberId)
   if (new Set(generatorIds).size !== expectedCount) {
-    return fail('RECOVERY_CODE_INVALID', '房主恢复码必须由两名不同成员生成')
+    return fail(
+      'RECOVERY_CODE_INVALID',
+      mode === 'owner'
+        ? '房主恢复码必须由两名不同成员生成'
+        : '临时恢复码无效',
+    )
   }
 
-  const [target, ...generators] = await Promise.all([
+  const memberDocuments = await Promise.all([
     getDocument('members', targetMemberId),
-    ...generatorIds.map((memberId) => getDocument('members', memberId)),
+    ...(mode === 'admin'
+      ? []
+      : generatorIds.map((memberId) => getDocument('members', memberId))),
   ])
+  const [target, ...generators] = memberDocuments
   if (!target?.active || target.roomId !== room._id) {
     return fail('RECOVERY_CODE_INVALID', '目标成员账号不可用')
   }
-  if (generators.some((member) => !member?.active || member.roomId !== room._id)) {
+  if (
+    mode !== 'admin' &&
+    generators.some((member) => !member?.active || member.roomId !== room._id)
+  ) {
     return fail('RECOVERY_CODE_INVALID', '确认成员账号不可用')
   }
   if (mode === 'member') {
     if (room.ownerId !== generatorIds[0] || target.role === 'owner') {
       return fail('RECOVERY_CODE_INVALID', '成员临时恢复码无效')
+    }
+  } else if (mode === 'admin') {
+    if (
+      room.ownerId !== target._id ||
+      target.role !== 'owner' ||
+      generatorIds[0] !== 'local-admin'
+    ) {
+      return fail('RECOVERY_CODE_INVALID', '房主救援码无效')
     }
   } else if (
     room.ownerId !== target._id ||
@@ -1923,6 +1949,7 @@ async function handleRecoverWithAssistance(event) {
       }
       if (
         (mode === 'owner' && currentRoom.ownerId !== currentTarget._id) ||
+        (mode === 'admin' && currentRoom.ownerId !== currentTarget._id) ||
         (mode === 'member' && currentRoom.ownerId !== generatorIds[0])
       ) {
         throw new Error('RECOVERY_CODE_INVALID')
@@ -1957,10 +1984,18 @@ async function handleRecoverWithAssistance(event) {
         member: currentTarget,
         deviceInstanceId,
         requestedDeviceLabel: event.deviceLabel,
-        method: mode === 'owner' ? 'owner_assistance' : 'member_assistance',
+        method:
+          mode === 'owner'
+            ? 'owner_assistance'
+            : mode === 'admin'
+              ? 'owner_admin_rescue'
+              : 'member_assistance',
         actorMemberId: target._id,
-        generatorMemberIds: generatorIds,
-        generatorNicknames: generators.map((member) => member.nickname),
+        generatorMemberIds: mode === 'admin' ? [] : generatorIds,
+        generatorNicknames:
+          mode === 'admin'
+            ? ['本地管理台']
+            : generators.map((member) => member.nickname),
       })
       const usedAt = nowIso()
       await Promise.all(
@@ -1982,6 +2017,48 @@ async function handleRecoverWithAssistance(event) {
     }
     throw error
   }
+}
+
+async function handleAdminCreateOwnerRecoveryCode(event) {
+  const adminCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-owner-recovery-admin',
+  )
+  if (!adminCheck.valid) return adminCheck.response
+
+  const creatorCheck = await verifyConfiguredSecret(
+    event,
+    event.creatorKey,
+    'DORMSYNC_CREATOR_KEY',
+    'admin-owner-recovery-creator',
+  )
+  if (!creatorCheck.valid) return creatorCheck.response
+
+  const room = await getRoom(cleanText(event.roomId, 100))
+  if (!room || room.closed) {
+    return fail('ROOM_NOT_FOUND', '宿舍不存在或已经关闭')
+  }
+  const owner = await getDocument('members', room.ownerId)
+  if (!owner?.active || owner.roomId !== room._id || owner.role !== 'owner') {
+    return fail('OWNER_NOT_FOUND', '当前房主账号不可用')
+  }
+
+  const issued = await issueTemporaryRecoveryCode({
+    room,
+    targetMember: owner,
+    generatorMember: {
+      _id: 'local-admin',
+      nickname: '本地管理台',
+    },
+    type: 'owner_admin_rescue',
+  })
+  return ok({
+    ...issued,
+    roomName: room.name,
+    ownerNickname: owner.nickname,
+  })
 }
 
 async function handleListRecoveryAudit(member) {
@@ -2815,6 +2892,9 @@ async function dispatch(event = {}) {
     if (event.action === 'recoverAccount') return await handleRecoverAccount(event)
     if (event.action === 'recoverWithAssistance') {
       return await handleRecoverWithAssistance(event)
+    }
+    if (event.action === 'adminCreateOwnerRecoveryCode') {
+      return await handleAdminCreateOwnerRecoveryCode(event)
     }
     if (event.action === 'adminListRooms') return await handleAdminListRooms(event)
 

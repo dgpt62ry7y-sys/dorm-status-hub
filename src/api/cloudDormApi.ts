@@ -143,7 +143,7 @@ export const cloudDormApi = {
 
   recoverWithAssistance(input: {
     inviteCode: string
-    recoveryMode: 'member' | 'owner'
+    recoveryMode: 'member' | 'owner' | 'admin'
     recoveryCodes: string[]
     deviceLabel: string
     deviceInstanceId: string

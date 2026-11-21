@@ -193,6 +193,82 @@ async function run() {
     throw new Error('Admin summary exposed sensitive room data')
   }
 
+  expectError(
+    await invoke({
+      action: 'adminCreateOwnerRecoveryCode',
+      adminKey: 'wrong-admin-key',
+      creatorKey: 'test-creator-key',
+      roomId: created.state.room.id,
+      clientIp: 'admin-rescue-ip',
+    }),
+    'INVALID_SECRET',
+  )
+  expectError(
+    await invoke({
+      action: 'adminCreateOwnerRecoveryCode',
+      adminKey: 'test-admin-key',
+      creatorKey: 'wrong-creator-key',
+      roomId: created.state.room.id,
+      clientIp: 'admin-rescue-ip',
+    }),
+    'INVALID_SECRET',
+  )
+  const adminRescue = ok(
+    await invoke({
+      action: 'adminCreateOwnerRecoveryCode',
+      adminKey: 'test-admin-key',
+      creatorKey: 'test-creator-key',
+      roomId: created.state.room.id,
+      clientIp: 'admin-rescue-ip',
+    }),
+    'admin owner recovery code',
+  )
+  if (
+    adminRescue.code.length !== 16 ||
+    adminRescue.type !== 'owner_admin_rescue' ||
+    Date.parse(adminRescue.expiresAt) <= Date.now()
+  ) {
+    throw new Error('Admin owner recovery code is invalid')
+  }
+
+  const rescuedOwner = ok(
+    await invoke({
+      action: 'recoverWithAssistance',
+      inviteCode: created.state.room.inviteCode,
+      recoveryMode: 'admin',
+      recoveryCodes: [adminRescue.code],
+      deviceLabel: 'Admin Rescue Device',
+      deviceInstanceId: crypto.randomUUID(),
+      clientIp: 'admin-rescue-ip',
+    }),
+    'recover owner with admin rescue code',
+  )
+  if (rescuedOwner.state.currentMemberId !== created.state.currentMemberId) {
+    throw new Error('Admin rescue restored the wrong member')
+  }
+  expectError(
+    await invoke({
+      action: 'recoverWithAssistance',
+      inviteCode: created.state.room.inviteCode,
+      recoveryMode: 'admin',
+      recoveryCodes: [adminRescue.code],
+      deviceLabel: 'Admin Rescue Reuse',
+      deviceInstanceId: crypto.randomUUID(),
+      clientIp: 'admin-rescue-ip',
+    }),
+    'RECOVERY_CODE_INVALID',
+  )
+  const rescueAudit = database.data
+    .get('accountRecoveryAudit')
+    .find(
+      (item) =>
+        item.roomId === created.state.room.id &&
+        item.method === 'owner_admin_rescue',
+    )
+  if (!rescueAudit || 'code' in rescueAudit) {
+    throw new Error('Admin rescue audit is missing or exposed a code')
+  }
+
   for (let attempt = 0; attempt < 5; attempt += 1) {
     expectError(
       await invoke({
@@ -254,6 +330,8 @@ async function run() {
         correctKeyUnlocksRoom: true,
         expiredRoomCleanupDeletesRecords: true,
         adminListIsReadOnlyAndSanitized: true,
+        adminOwnerRescueCode: true,
+        adminOwnerRescueAudited: true,
         failedAttemptsRateLimited: true,
         publicJoinRateLimited: true,
       },

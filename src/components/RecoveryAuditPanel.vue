@@ -14,10 +14,12 @@ const visible = computed(() => isOwner.value && !demoMode)
 
 function eventLabel(entry: RecoveryAuditEntry): string {
   if (entry.eventType === 'code_generated') {
+    if (entry.method === 'owner_admin_rescue') return '本地管理台生成房主救援码'
     return entry.method === 'owner_assist'
       ? '生成房主临时恢复码'
       : '生成成员临时恢复码'
   }
+  if (entry.method === 'owner_admin_rescue') return '房主通过救援码恢复完成'
   if (entry.method === 'owner_assistance') return '房主账号恢复完成'
   if (entry.method === 'member_assistance') return '成员账号恢复完成'
   return '账号恢复完成'

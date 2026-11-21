@@ -128,8 +128,10 @@ function saveSession(token: string, next: DormState): void {
 }
 
 function clearSession(): void {
+  const storedToken = localStorage.getItem(TOKEN_KEY)
+  const failedToken = memberToken.value
+  if (storedToken === failedToken) localStorage.removeItem(TOKEN_KEY)
   memberToken.value = ''
-  localStorage.removeItem(TOKEN_KEY)
   Object.assign(state, createEmptyState())
   phase.value = 'onboarding'
   lastSyncedAt.value = null
@@ -536,7 +538,7 @@ async function recoverAccount(
 
 async function recoverWithAssistance(
   inviteCode: string,
-  recoveryMode: 'member' | 'owner',
+  recoveryMode: 'member' | 'owner' | 'admin',
   recoveryCodes: string[],
 ): Promise<void> {
   const result = await cloudDormApi.recoverWithAssistance({

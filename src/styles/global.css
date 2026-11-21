@@ -381,6 +381,32 @@ textarea:focus-visible {
   box-shadow: 0 2px 8px rgba(17, 18, 20, 0.06);
 }
 
+.access-tabs--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.access-tabs--three button {
+  gap: 4px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.access-recovery-help {
+  margin: -3px 0 0;
+  padding: 11px 13px;
+  border: 1px solid #ddd9cf;
+  border-radius: 10px;
+  background: #f3f0e8;
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+.access-recovery-help code {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .access-form {
   display: grid;
   gap: 17px;
