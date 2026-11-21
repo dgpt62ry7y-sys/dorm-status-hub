@@ -7,6 +7,7 @@ import {
   KeyRound,
   Link2,
   LoaderCircle,
+  MessageSquarePlus,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -16,6 +17,7 @@ import { useDormStore } from '../composables/useDormStore'
 import { DORMSYNC_API_URL } from '../config/cloudbase'
 import type { RoomCapacity } from '../types/dorm'
 import { getLastRoomHint } from '../utils/lastRoom'
+import FeedbackDialog from './FeedbackDialog.vue'
 
 const {
   phase,
@@ -50,6 +52,9 @@ const capacityOptions: RoomCapacity[] = [4, 6]
 const creatorKey = ref('')
 const submitting = ref(false)
 const formError = ref('')
+const feedbackOpen = ref(false)
+const feedbackEnabled =
+  !__DEMO_MODE__ && import.meta.env.VITE_LOCAL_TEST_MODE !== 'true'
 
 const submitLabel = computed(() => {
   if (submitting.value) return '正在连接…'
@@ -220,6 +225,15 @@ async function submit(): Promise<void> {
 
   <div v-else class="access-gate">
     <section class="access-panel" aria-labelledby="access-heading">
+      <button
+        v-if="feedbackEnabled"
+        type="button"
+        class="feedback-trigger feedback-trigger--access"
+        @click="feedbackOpen = true"
+      >
+        <MessageSquarePlus :size="15" aria-hidden="true" />
+        反馈
+      </button>
       <p class="eyebrow">宿舍状态共享站 / 云端空间</p>
       <h1 id="access-heading">进入宿舍空间</h1>
       <p class="access-intro">{{ intro }}</p>
@@ -518,4 +532,11 @@ async function submit(): Promise<void> {
       </p>
     </section>
   </div>
+
+  <FeedbackDialog
+    v-if="feedbackEnabled"
+    :visible="feedbackOpen"
+    page="creation"
+    @close="feedbackOpen = false"
+  />
 </template>

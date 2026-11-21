@@ -6,6 +6,7 @@ import type {
   DeviceSession,
   DormState,
   DormStatus,
+  FeedbackPage,
   ReleaseNotice,
   RoomCapacity,
   StatusUpdate,
@@ -69,6 +70,9 @@ const releaseNoticeDialog = ref<ReleaseNotice | null>(null)
 const initialServerVersion = ref('')
 const notificationTopicUpdateAvailable = ref(false)
 const realtimeConnected = ref(false)
+const latestPublicVersion = ref('')
+const feedbackEnabled = ref(!__DEMO_MODE__)
+const clientUpdateRequired = ref(false)
 
 let pollTimer: number | undefined
 let realtimeRefreshTimer: number | undefined
@@ -192,6 +196,39 @@ function compareVersions(left: string, right: string): number {
   return 0
 }
 
+async function checkPublicConfig(): Promise<boolean> {
+  try {
+    if (__DEMO_MODE__) {
+      const versionUrl = new URL(
+        `${import.meta.env.BASE_URL}version.json`,
+        window.location.origin,
+      )
+      versionUrl.searchParams.set('t', String(Date.now()))
+      const response = await fetch(versionUrl, { cache: 'no-store' })
+      if (!response.ok) return false
+      const config = (await response.json()) as { version?: string }
+      const version = String(config.version || '')
+      if (version && compareVersions(version, __APP_VERSION__) > 0) {
+        window.location.reload()
+        return true
+      }
+      return false
+    }
+
+    const config = await cloudDormApi.getPublicConfig()
+    latestPublicVersion.value = config.releaseVersion
+    feedbackEnabled.value = config.feedbackEnabled
+    const required = compareVersions(config.releaseVersion, __APP_VERSION__) > 0
+    if (required) {
+      clientUpdateRequired.value = true
+      stopSync()
+    }
+    return required
+  } catch {
+    return false
+  }
+}
+
 function startFallbackPolling(): void {
   if (pollTimer || phase.value !== 'ready') return
   pollTimer = window.setInterval(() => {
@@ -313,10 +350,15 @@ function bindLifecycle(): void {
   lifecycleBound = true
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && memberToken.value) {
-      void refresh(true, true, true)
-      reconcileRealtime()
-    } else if (document.visibilityState !== 'visible') {
+    if (document.visibilityState === 'visible') {
+      void checkPublicConfig().then((required) => {
+        if (required) return
+        if (memberToken.value) {
+          void refresh(true, true, true)
+          reconcileRealtime()
+        }
+      })
+    } else {
       closeRealtime()
     }
   })
@@ -428,6 +470,11 @@ async function initialize(): Promise<void> {
   if (initialized) return
   initialized = true
   bindLifecycle()
+
+  if (await checkPublicConfig()) {
+    phase.value = 'onboarding'
+    return
+  }
 
   if (!memberToken.value) {
     phase.value = 'onboarding'
@@ -577,6 +624,22 @@ async function listRecoveryAudit() {
   return cloudDormApi.listRecoveryAudit(memberToken.value)
 }
 
+async function submitFeedback(
+  items: string[],
+  contact: string,
+  page: FeedbackPage,
+) {
+  return cloudDormApi.submitFeedback({
+    items,
+    contact,
+    page,
+    appVersion: __APP_VERSION__,
+    deviceLabel: getDeviceLabel(),
+    deviceInstanceId: getDeviceInstanceId(),
+    memberToken: memberToken.value || undefined,
+  })
+}
+
 async function saveStatus(update: StatusUpdate): Promise<string | null> {
   const next = await cloudDormApi.updateStatus(memberToken.value, update)
   const warning = next.notificationWarning || null
@@ -692,7 +755,9 @@ async function refreshToLatest(): Promise<void> {
     const registration = await navigator.serviceWorker?.getRegistration()
     await registration?.update()
   } finally {
-    window.location.reload()
+    const url = new URL(window.location.href)
+    url.searchParams.set('refresh', String(Date.now()))
+    window.location.replace(url.toString())
   }
 }
 
@@ -796,8 +861,9 @@ export function useDormStore() {
   )
   const updateAvailable = computed(
     () =>
-      Boolean(initialServerVersion.value) &&
-      compareVersions(initialServerVersion.value, __APP_VERSION__) > 0,
+      clientUpdateRequired.value ||
+      (Boolean(initialServerVersion.value) &&
+        compareVersions(initialServerVersion.value, __APP_VERSION__) > 0),
   )
 
   return {
@@ -815,6 +881,9 @@ export function useDormStore() {
     releaseNoticeVisible,
     capacityNoticeVisible,
     updateAvailable,
+    latestPublicVersion,
+    feedbackEnabled,
+    clientUpdateRequired,
     notificationTopicUpdateAvailable,
     realtimeConnected,
     currentMember,
@@ -833,6 +902,7 @@ export function useDormStore() {
     createMemberRecoveryCode,
     createOwnerRecoveryCode,
     listRecoveryAudit,
+    submitFeedback,
     saveStatus,
     saveProfile,
     updateNickname,

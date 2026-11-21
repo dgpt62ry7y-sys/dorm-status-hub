@@ -32,6 +32,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `joinRequests`：加入请求的幂等记录，避免重复点击或网络重试创建多个成员。
 - `temporaryRecoveryCodes`：临时恢复码哈希、目标账号、签发成员、类型、有效期和使用状态。
 - `accountRecoveryAudit`：临时码生成和账号恢复结果，仅供房主读取。
+- `feedbackEntries`：正式站反馈文字、选填联系方式、页面/版本/设备信息和已读状态。
 
 ## API
 
@@ -48,6 +49,10 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - `createOwnerRecoveryCode` 由普通成员为房主生成一次性临时恢复码。
 - `listRecoveryAudit` 只向房主返回最近的恢复记录，不返回恢复码、令牌或设备凭证。
 - `adminCreateOwnerRecoveryCode` 由本机管理站调用，同时验证管理密钥和创建密钥后生成 10 分钟一次性房主救援码。
+- `getPublicConfig` 返回当前正式版本，用于打开页面和微信返回前台时执行强制更新检查。
+- `submitFeedback` 允许创建页匿名反馈或设置页登录反馈，按设备与哈希 IP 限流。
+- `adminListFeedback`、`adminUpdateFeedback` 仅供本机管理台读取、标记和删除反馈。
+- `adminGetFeedbackBark` 和 `adminSaveFeedbackBark` 用于维护独享 Bark 反馈通道，真实测试成功后才加密保存。
 - `listDevices` 和 `revokeDevice` 用于设备管理。
 - `rotateRecoveryCode` 重新生成恢复码并立即使旧码失效。
 - `updateRoomCapacity` 由当前房主在四人寝与六人寝之间切换容量。
@@ -78,6 +83,7 @@ CloudBase PostgreSQL 开启 Document 扩展后，使用以下文档集合：
 - 新成员先保存恢复码，再读取从 `1.0.0` 开始的历史累计公告。
 - 只有房主可以轮换通知 Topic 或发送测试通知。
 - 每个成员只能读取、测试和删除自己的 Bark 设备，最多登记 5 台。
+- 反馈自动信息不包含昵称、状态内容、留言、令牌、恢复码、Bark Key 或原始 IP。
 - 单个普通成员的临时恢复码只能由房主生成；房主恢复必须使用两名不同成员生成的两个临时码。
 - 恢复默认保留现有设备；已达到 5 台上限时，自动撤销最近在线时间最早的一台。
 

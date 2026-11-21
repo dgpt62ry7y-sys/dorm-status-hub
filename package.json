@@ -1,7 +1,7 @@
 {
   "name": "dormsync",
   "private": true,
-  "version": "1.9.5",
+  "version": "1.10.0",
   "description": "A self-hosted roommate status-sharing web app for four- and six-person dorms.",
   "license": "MIT",
   "engines": {
@@ -29,11 +29,12 @@
     "preview": "vite preview --host 0.0.0.0",
     "predeploy": "npm run check:release",
     "check:release": "node scripts/check-release-notes.mjs",
-    "test": "npm run test:account && npm run test:release && npm run test:recovery && npm run test:auth && npm run test:notification && npm run test:bark && npm run test:realtime && npm run test:update-log",
+    "test": "npm run test:account && npm run test:release && npm run test:recovery && npm run test:auth && npm run test:feedback && npm run test:notification && npm run test:bark && npm run test:realtime && npm run test:update-log",
     "test:account": "node tests/device-account.test.cjs",
     "test:release": "node tests/release-notice.test.cjs",
     "test:recovery": "node tests/account-recovery-flow.test.cjs",
     "test:auth": "node tests/room-auth.test.cjs",
+    "test:feedback": "node tests/feedback.test.cjs",
     "test:notification": "node tests/notification.test.cjs",
     "test:bark": "node tests/bark-notification.test.cjs",
     "test:realtime": "node tests/realtime-sync.test.cjs",

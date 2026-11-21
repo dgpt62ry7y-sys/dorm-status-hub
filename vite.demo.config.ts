@@ -9,7 +9,19 @@ export default defineConfig({
   root,
   base: process.env.VITE_DEMO_BASE || '/',
   publicDir: path.resolve(import.meta.dirname, 'public'),
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    {
+      name: 'dormsync-demo-version-file',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: `${JSON.stringify({ version: APP_VERSION })}\n`,
+        })
+      },
+    },
+  ],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
     __DEMO_MODE__: 'true',

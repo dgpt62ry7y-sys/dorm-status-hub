@@ -2,15 +2,20 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   Check,
+  CheckCheck,
   Copy,
   DoorOpen,
+  Inbox,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
+  BellRing,
+  MessageSquareText,
   RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   X,
 } from '@lucide/vue'
 
@@ -37,6 +42,19 @@ interface AdminRescueResult {
   inviteCode: string
 }
 
+interface AdminFeedback {
+  id: string
+  items: string[]
+  contact: string
+  page: 'creation' | 'settings'
+  appVersion: string
+  deviceLabel: string
+  roomName: string
+  inviteCode: string
+  status: 'unread' | 'read'
+  createdAt: string
+}
+
 const apiUrl = import.meta.env.VITE_DORMSYNC_API_URL
 const storedKey = sessionStorage.getItem('dormsync:admin-key') || ''
 const adminKey = ref(storedKey)
@@ -50,6 +68,17 @@ const rescueLoading = ref(false)
 const rescueError = ref('')
 const rescueResult = ref<AdminRescueResult | null>(null)
 const rescueCopied = ref(false)
+const activeView = ref<'rooms' | 'feedback'>('rooms')
+const feedbackEntries = ref<AdminFeedback[]>([])
+const feedbackLoading = ref(false)
+const feedbackError = ref('')
+const feedbackBarkInput = ref('')
+const feedbackBarkConfigured = ref(false)
+const feedbackBarkMasked = ref('')
+const feedbackBarkSaving = ref(false)
+const feedbackBarkError = ref('')
+const feedbackBarkNotice = ref('')
+const copiedFeedbackId = ref('')
 
 const filteredRooms = computed(() => {
   const keyword = query.value.trim().toLowerCase()
@@ -64,6 +93,10 @@ const filteredRooms = computed(() => {
 
 const pendingCount = computed(
   () => rooms.value.filter((room) => room.verificationStatus === 'pending').length,
+)
+
+const unreadFeedbackCount = computed(
+  () => feedbackEntries.value.filter((item) => item.status === 'unread').length,
 )
 
 function formatTime(value: string | null): string {
@@ -82,6 +115,20 @@ function formatRecoveryCode(value: string): string {
   return value.match(/.{1,4}/g)?.join('-') || value
 }
 
+async function adminRequest(
+  action: string,
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, any>> {
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, adminKey: adminKey.value, ...payload }),
+  })
+  const result = await response.json()
+  if (!result.ok) throw new Error(result.error.message)
+  return result.data
+}
+
 async function loadRooms(): Promise<void> {
   if (!adminKey.value.trim()) {
     errorMessage.value = '请输入管理密钥'
@@ -91,23 +138,114 @@ async function loadRooms(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        action: 'adminListRooms',
-        adminKey: adminKey.value,
-      }),
-    })
-    const result = await response.json()
-    if (!result.ok) throw new Error(result.error.message)
-    rooms.value = result.data.rooms
+    const data = await adminRequest('adminListRooms')
+    rooms.value = data.rooms
     sessionStorage.setItem('dormsync:admin-key', adminKey.value)
+    await Promise.all([loadFeedback(), loadFeedbackBark()])
   } catch (error) {
     rooms.value = []
     errorMessage.value = error instanceof Error ? error.message : '读取失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadFeedback(): Promise<void> {
+  if (!adminKey.value.trim()) return
+  feedbackLoading.value = true
+  feedbackError.value = ''
+  try {
+    const data = await adminRequest('adminListFeedback')
+    feedbackEntries.value = data.entries
+  } catch (error) {
+    feedbackError.value = error instanceof Error ? error.message : '反馈读取失败'
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+async function loadFeedbackBark(): Promise<void> {
+  try {
+    const data = await adminRequest('adminGetFeedbackBark')
+    feedbackBarkConfigured.value = Boolean(data.configured)
+    feedbackBarkMasked.value = data.maskedKey || ''
+  } catch {
+    feedbackBarkConfigured.value = false
+    feedbackBarkMasked.value = ''
+  }
+}
+
+async function setFeedbackStatus(
+  feedback: AdminFeedback,
+  status: 'read' | 'unread',
+): Promise<void> {
+  try {
+    await adminRequest('adminUpdateFeedback', {
+      feedbackId: feedback.id,
+      feedbackAction: status,
+    })
+    feedback.status = status
+  } catch (error) {
+    feedbackError.value = error instanceof Error ? error.message : '反馈更新失败'
+  }
+}
+
+async function deleteFeedback(feedback: AdminFeedback): Promise<void> {
+  if (!window.confirm('永久删除这条反馈？')) return
+  try {
+    await adminRequest('adminUpdateFeedback', {
+      feedbackId: feedback.id,
+      feedbackAction: 'delete',
+    })
+    feedbackEntries.value = feedbackEntries.value.filter(
+      (item) => item.id !== feedback.id,
+    )
+  } catch (error) {
+    feedbackError.value = error instanceof Error ? error.message : '反馈删除失败'
+  }
+}
+
+async function copyFeedbackContact(feedback: AdminFeedback): Promise<void> {
+  if (!feedback.contact) return
+  try {
+    await navigator.clipboard.writeText(feedback.contact)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = feedback.contact
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+  copiedFeedbackId.value = feedback.id
+  window.setTimeout(() => {
+    copiedFeedbackId.value = ''
+  }, 1400)
+}
+
+async function saveFeedbackBark(): Promise<void> {
+  if (!feedbackBarkInput.value.trim()) {
+    feedbackBarkError.value = '请输入 Bark Device Key 或测试链接'
+    return
+  }
+  feedbackBarkSaving.value = true
+  feedbackBarkError.value = ''
+  feedbackBarkNotice.value = ''
+  try {
+    const data = await adminRequest('adminSaveFeedbackBark', {
+      deviceKey: feedbackBarkInput.value.trim(),
+    })
+    feedbackBarkConfigured.value = true
+    feedbackBarkMasked.value = data.maskedKey || ''
+    feedbackBarkInput.value = ''
+    feedbackBarkNotice.value = '测试通知发送成功，反馈通知地址已加密保存'
+  } catch (error) {
+    feedbackBarkError.value =
+      error instanceof Error ? error.message : 'Bark 地址保存失败'
+  } finally {
+    feedbackBarkSaving.value = false
   }
 }
 
@@ -117,6 +255,11 @@ function logout(): void {
   rooms.value = []
   errorMessage.value = ''
   closeRescue()
+  feedbackEntries.value = []
+  feedbackBarkInput.value = ''
+  feedbackBarkConfigured.value = false
+  feedbackBarkMasked.value = ''
+  activeView.value = 'rooms'
 }
 
 function openRescue(room: AdminRoom): void {
@@ -248,8 +391,28 @@ onBeforeUnmount(() => {
 
     <p v-if="errorMessage" class="admin-error">{{ errorMessage }}</p>
 
-    <template v-if="rooms.length">
-      <section class="admin-summary">
+    <template v-if="rooms.length || feedbackEntries.length">
+      <nav class="admin-tabs" aria-label="管理台视图">
+        <button
+          type="button"
+          :class="{ active: activeView === 'rooms' }"
+          @click="activeView = 'rooms'"
+        >
+          寝室列表
+          <span>{{ rooms.length }}</span>
+        </button>
+        <button
+          type="button"
+          :class="{ active: activeView === 'feedback' }"
+          @click="activeView = 'feedback'; loadFeedback()"
+        >
+          反馈收件箱
+          <span v-if="unreadFeedbackCount">{{ unreadFeedbackCount }}</span>
+        </button>
+      </nav>
+
+      <template v-if="activeView === 'rooms'">
+        <section class="admin-summary">
         <div>
           <span>寝室总数</span>
           <strong>{{ rooms.length }}</strong>
@@ -328,10 +491,124 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
-      <p v-if="filteredRooms.length === 0" class="admin-empty">
-        <DoorOpen :size="18" aria-hidden="true" />
-        没有匹配的寝室
-      </p>
+        <p v-if="filteredRooms.length === 0" class="admin-empty">
+          <DoorOpen :size="18" aria-hidden="true" />
+          没有匹配的寝室
+        </p>
+      </template>
+
+      <section v-else class="admin-feedback">
+        <header class="admin-feedback__header">
+          <div>
+            <p class="admin-eyebrow">FEEDBACK INBOX</p>
+            <h2>反馈收件箱</h2>
+            <p>反馈永久保留，只在当前本机管理台可见。</p>
+          </div>
+          <button type="button" :disabled="feedbackLoading" @click="loadFeedback">
+            <RefreshCw :class="{ spin: feedbackLoading }" :size="16" aria-hidden="true" />
+            刷新反馈
+          </button>
+        </header>
+
+        <section class="admin-bark-setting">
+          <div class="admin-bark-setting__copy">
+            <span><BellRing :size="17" aria-hidden="true" /> 独享 Bark 通知</span>
+            <strong v-if="feedbackBarkConfigured">
+              已连接 {{ feedbackBarkMasked }}
+            </strong>
+            <strong v-else>尚未连接</strong>
+            <p>每条新反馈立即推送；联系方式不会进入 Bark 通知。</p>
+          </div>
+          <div class="admin-bark-setting__form">
+            <input
+              v-model="feedbackBarkInput"
+              type="password"
+              autocomplete="off"
+              placeholder="粘贴 Bark Device Key 或 api.day.app 测试链接"
+              @keyup.enter="saveFeedbackBark"
+            />
+            <button type="button" :disabled="feedbackBarkSaving" @click="saveFeedbackBark">
+              <LoaderCircle
+                v-if="feedbackBarkSaving"
+                class="spin"
+                :size="15"
+                aria-hidden="true"
+              />
+              <BellRing v-else :size="15" aria-hidden="true" />
+              {{ feedbackBarkSaving ? '正在测试…' : '测试并保存' }}
+            </button>
+          </div>
+          <p v-if="feedbackBarkError" class="admin-feedback__error">
+            {{ feedbackBarkError }}
+          </p>
+          <p v-if="feedbackBarkNotice" class="admin-feedback__notice">
+            {{ feedbackBarkNotice }}
+          </p>
+        </section>
+
+        <p v-if="feedbackError" class="admin-feedback__error">{{ feedbackError }}</p>
+        <div v-if="feedbackLoading" class="admin-feedback__loading">
+          <LoaderCircle class="spin" :size="17" aria-hidden="true" />
+          正在读取反馈
+        </div>
+        <p v-else-if="feedbackEntries.length === 0" class="admin-empty">
+          <Inbox :size="18" aria-hidden="true" />
+          暂无反馈
+        </p>
+        <div v-else class="admin-feedback__list">
+          <article
+            v-for="feedback in feedbackEntries"
+            :key="feedback.id"
+            :class="{ unread: feedback.status === 'unread' }"
+          >
+            <header>
+              <span>
+                <MessageSquareText :size="15" aria-hidden="true" />
+                {{ feedback.page === 'settings' ? '设置页反馈' : '创建页反馈' }}
+                <i v-if="feedback.status === 'unread'">未读</i>
+              </span>
+              <time>{{ formatTime(feedback.createdAt) }}</time>
+            </header>
+            <ol>
+              <li v-for="(item, index) in feedback.items" :key="index">{{ item }}</li>
+            </ol>
+            <div class="admin-feedback__meta">
+              <span v-if="feedback.roomName">
+                {{ feedback.roomName }}
+                <small v-if="feedback.inviteCode">{{ feedback.inviteCode }}</small>
+              </span>
+              <span>{{ feedback.deviceLabel || '设备未知' }}</span>
+              <span>V{{ feedback.appVersion || '未知' }}</span>
+            </div>
+            <div class="admin-feedback__contact">
+              <span>联系方式</span>
+              <strong>{{ feedback.contact || '未填写' }}</strong>
+              <button
+                v-if="feedback.contact"
+                type="button"
+                @click="copyFeedbackContact(feedback)"
+              >
+                <Check v-if="copiedFeedbackId === feedback.id" :size="14" aria-hidden="true" />
+                <Copy v-else :size="14" aria-hidden="true" />
+                {{ copiedFeedbackId === feedback.id ? '已复制' : '复制' }}
+              </button>
+            </div>
+            <div class="admin-feedback__actions">
+              <button
+                type="button"
+                @click="setFeedbackStatus(feedback, feedback.status === 'unread' ? 'read' : 'unread')"
+              >
+                <CheckCheck :size="14" aria-hidden="true" />
+                {{ feedback.status === 'unread' ? '标为已读' : '标为未读' }}
+              </button>
+              <button type="button" class="danger" @click="deleteFeedback(feedback)">
+                <Trash2 :size="14" aria-hidden="true" />
+                删除
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
     </template>
 
     <Teleport to="body">

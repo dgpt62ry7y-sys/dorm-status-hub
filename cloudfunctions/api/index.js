@@ -13,6 +13,13 @@ const DEVICE_LINK_TTL_MS = 5 * 60 * 1000
 const TEMP_RECOVERY_TTL_MS = 10 * 60 * 1000
 const SECURITY_WINDOW_MS = 15 * 60 * 1000
 const MAX_SECURITY_ATTEMPTS = 5
+const FEEDBACK_SHORT_WINDOW_MS = 10 * 60 * 1000
+const FEEDBACK_SHORT_LIMIT = 3
+const FEEDBACK_DAILY_WINDOW_MS = 24 * 60 * 60 * 1000
+const FEEDBACK_DAILY_LIMIT = 10
+const FEEDBACK_MAX_ITEMS = 5
+const FEEDBACK_ITEM_MAX_LENGTH = 300
+const FEEDBACK_CONTACT_MAX_LENGTH = 100
 const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['joinRoom', { scope: 'join-room', maxAttempts: 30 }],
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
@@ -36,6 +43,8 @@ const BARK_ENCRYPTION_AAD = 'dormsync:bark-subscription:v1'
 const NOTIFICATION_TITLE = 'DormSync · 宿舍状态更新'
 const NOTIFICATION_TEST_TITLE = 'DormSync · 宿舍通知测试'
 const BARK_NOTIFICATION_TEST_TITLE = 'DormSync · Bark 通知测试'
+const FEEDBACK_BARK_TITLE = 'DormSync · 新反馈'
+const FEEDBACK_BARK_SETTING_ID = 'feedback-bark-v1'
 const VALID_STATUSES = new Set(['sleep', 'normal', 'focus', 'away'])
 const TIMED_STATUSES = new Set(['sleep', 'focus', 'away'])
 const REQUIRED_TIME_STATUSES = new Set(['sleep', 'away'])
@@ -54,6 +63,7 @@ const COLLECTIONS = [
   'joinRequests',
   'temporaryRecoveryCodes',
   'accountRecoveryAudit',
+  'feedbackEntries',
 ]
 const CURRENT_RELEASE_VERSION = releases.at(-1).version
 
@@ -283,6 +293,82 @@ function barkDeviceView(subscription) {
 
 function barkDeviceLabel(value) {
   return cleanText(value, 30).replace(/[\r\n\t]+/g, ' ') || 'Bark 设备'
+}
+
+function normalizeFeedbackItems(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => cleanText(item, FEEDBACK_ITEM_MAX_LENGTH))
+    .filter(Boolean)
+    .slice(0, FEEDBACK_MAX_ITEMS)
+}
+
+async function consumeFeedbackRateLimit(event, deviceInstanceId) {
+  const clientKey = clientIpKey(event)
+  const deviceKey = hashToken(cleanText(deviceInstanceId, 100) || 'unknown-device')
+  const now = Date.now()
+  const shortWindow = Math.floor(now / FEEDBACK_SHORT_WINDOW_MS)
+  const dayWindow = Math.floor(now / FEEDBACK_DAILY_WINDOW_MS)
+  const shortId = hashToken(
+    `feedback:short:${clientKey}:${deviceKey}:${shortWindow}`,
+  )
+  const dayId = hashToken(`feedback:day:${clientKey}:${deviceKey}:${dayWindow}`)
+  const [shortAttempt, dayAttempt] = await Promise.all([
+    getDocument('securityAttempts', shortId),
+    getDocument('securityAttempts', dayId),
+  ])
+  if (
+    Number(shortAttempt?.count || 0) >= FEEDBACK_SHORT_LIMIT ||
+    Number(dayAttempt?.count || 0) >= FEEDBACK_DAILY_LIMIT
+  ) {
+    return false
+  }
+
+  const updatedAt = nowIso()
+  await Promise.all([
+    db.collection('securityAttempts').doc(shortId).set({
+      scope: 'feedback:short',
+      clientIpHash: clientKey,
+      deviceHash: deviceKey,
+      windowId: shortWindow,
+      count: Number(shortAttempt?.count || 0) + 1,
+      updatedAt,
+    }),
+    db.collection('securityAttempts').doc(dayId).set({
+      scope: 'feedback:day',
+      clientIpHash: clientKey,
+      deviceHash: deviceKey,
+      windowId: dayWindow,
+      count: Number(dayAttempt?.count || 0) + 1,
+      updatedAt,
+    }),
+  ])
+  return true
+}
+
+async function sendFeedbackBarkNotification(feedback) {
+  const setting = await getDocument('systemSettings', FEEDBACK_BARK_SETTING_ID)
+  if (!setting?.enabled || !setting.encryptedKey) {
+    return { configured: false, delivered: false }
+  }
+  const key = decryptBarkDeviceKey(setting.encryptedKey)
+  if (!key) return { configured: true, delivered: false }
+
+  const roomLabel = feedback.roomName
+    ? `${feedback.roomName}${feedback.inviteCode ? ` / ${feedback.inviteCode}` : ''}`
+    : '未登录创建页'
+  const firstItem = feedback.items[0] || '无文字内容'
+  const body = [
+    `🏠 ${roomLabel}`,
+    `📝 ${feedback.items.length} 个反馈项目`,
+    `“${notificationSafeText(firstItem).slice(0, 120)}”`,
+  ].join('\n')
+  const result = await publishBarkMessage([key], FEEDBACK_BARK_TITLE, body)
+  return {
+    configured: true,
+    delivered: result.ok,
+    failureCount: result.failureCount,
+  }
 }
 
 function beijingDateParts(value) {
@@ -2933,6 +3019,177 @@ async function cleanupExpiredUnverifiedRooms() {
   return { checked: rooms.length, deleted }
 }
 
+async function handleSubmitFeedback(event) {
+  const items = normalizeFeedbackItems(event.items)
+  const contact = cleanText(event.contact, FEEDBACK_CONTACT_MAX_LENGTH)
+  const deviceInstanceId = cleanText(event.deviceInstanceId, 100)
+  const page = event.page === 'settings' ? 'settings' : 'creation'
+  if (items.length === 0) {
+    return fail('FEEDBACK_REQUIRED', '请至少填写一个反馈项目')
+  }
+  if (!deviceInstanceId) {
+    return fail('DEVICE_ID_REQUIRED', '无法识别当前设备，请刷新后重试')
+  }
+  if (!(await consumeFeedbackRateLimit(event, deviceInstanceId))) {
+    return fail('FEEDBACK_RATE_LIMITED', '提交过于频繁，请稍后再试')
+  }
+
+  let member = null
+  let room = null
+  if (event.memberToken) {
+    const context = await findAuthenticatedContext(event.memberToken)
+    if (context) {
+      member = context.member
+      room = await getRoom(member.roomId)
+    }
+  }
+
+  const createdAt = nowIso()
+  const feedback = {
+    items,
+    contact,
+    page,
+    appVersion: cleanText(event.appVersion, 30),
+    deviceLabel: deviceLabel(event.deviceLabel),
+    roomId: room?._id || '',
+    roomName: room?.name || '',
+    inviteCode: room?.inviteCode || '',
+    status: 'unread',
+    createdAt,
+    updatedAt: createdAt,
+  }
+  const inserted = await db.collection('feedbackEntries').add(feedback)
+  const feedbackId = insertedId(inserted)
+  const bark = await sendFeedbackBarkNotification(feedback)
+  return ok({
+    id: feedbackId,
+    submittedAt: createdAt,
+    barkConfigured: bark.configured,
+    barkDelivered: bark.delivered,
+  })
+}
+
+async function handleAdminListFeedback(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-list-feedback',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const result = await db.collection('feedbackEntries').limit(500).get()
+  const entries = result.data
+    .sort(
+      (left, right) =>
+        Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''),
+    )
+    .map((item) => ({
+      id: item._id,
+      items: Array.isArray(item.items) ? item.items : [],
+      contact: item.contact || '',
+      page: item.page || 'creation',
+      appVersion: item.appVersion || '',
+      deviceLabel: item.deviceLabel || '',
+      roomName: item.roomName || '',
+      inviteCode: item.inviteCode || '',
+      status: item.status === 'read' ? 'read' : 'unread',
+      createdAt: item.createdAt,
+    }))
+  return ok({
+    entries,
+    unreadCount: entries.filter((item) => item.status === 'unread').length,
+  })
+}
+
+async function handleAdminUpdateFeedback(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-update-feedback',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const feedbackId = cleanText(event.feedbackId, 100)
+  const feedback = await getDocument('feedbackEntries', feedbackId)
+  if (!feedback) return fail('FEEDBACK_NOT_FOUND', '反馈不存在')
+  const action = String(event.feedbackAction || '')
+  if (action === 'delete') {
+    await db.collection('feedbackEntries').doc(feedbackId).delete()
+    return ok({ deleted: true })
+  }
+  if (!['read', 'unread'].includes(action)) {
+    return fail('INVALID_FEEDBACK_ACTION', '反馈操作无效')
+  }
+  await db.collection('feedbackEntries').doc(feedbackId).update({
+    status: action,
+    updatedAt: nowIso(),
+  })
+  return ok({ status: action })
+}
+
+async function handleAdminGetFeedbackBark(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-feedback-bark-read',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const setting = await getDocument('systemSettings', FEEDBACK_BARK_SETTING_ID)
+  return ok({
+    configured: Boolean(setting?.enabled && setting.encryptedKey),
+    maskedKey: setting?.keySuffix ? `••••${setting.keySuffix}` : '',
+    updatedAt: setting?.updatedAt || null,
+  })
+}
+
+async function handleAdminSaveFeedbackBark(event) {
+  const keyCheck = await verifyConfiguredSecret(
+    event,
+    event.adminKey,
+    'DORMSYNC_ADMIN_KEY',
+    'admin-feedback-bark-save',
+  )
+  if (!keyCheck.valid) return keyCheck.response
+
+  const key = parseBarkDeviceKey(event.deviceKey)
+  if (!key) {
+    return fail(
+      'BARK_DEVICE_INVALID',
+      '请输入 Bark Device Key 或 api.day.app 测试链接',
+    )
+  }
+  const tested = await publishBarkMessage(
+    [key],
+    'DormSync · 反馈通知已连接',
+    '后续收到正式站反馈时，会立即推送到这台设备。',
+  )
+  if (!tested.ok) {
+    return fail('BARK_TEST_FAILED', '测试通知发送失败，请检查地址后重试')
+  }
+  const encryptedKey = encryptBarkDeviceKey(key)
+  if (!encryptedKey) {
+    return fail('BARK_NOT_CONFIGURED', 'Bark 加密密钥尚未配置')
+  }
+
+  const updatedAt = nowIso()
+  await db.collection('systemSettings').doc(FEEDBACK_BARK_SETTING_ID).set({
+    enabled: true,
+    encryptedKey,
+    keyFingerprint: hashToken(key),
+    keySuffix: key.slice(-4),
+    updatedAt,
+  })
+  return ok({
+    configured: true,
+    maskedKey: `••••${key.slice(-4)}`,
+    updatedAt,
+  })
+}
+
 async function handleAdminListRooms(event) {
   const keyCheck = await verifyConfiguredSecret(
     event,
@@ -3007,6 +3264,12 @@ async function dispatch(event = {}) {
   try {
     await ensureCollections()
 
+    if (event.action === 'getPublicConfig') {
+      return ok({
+        releaseVersion: CURRENT_RELEASE_VERSION,
+        feedbackEnabled: !isLocalTestMode(),
+      })
+    }
     if (event.action === 'createRoom') return await handleCreateRoom(event)
     if (
       PUBLIC_ACTION_RATE_LIMITS.has(event.action) &&
@@ -3020,10 +3283,25 @@ async function dispatch(event = {}) {
     if (event.action === 'recoverWithAssistance') {
       return await handleRecoverWithAssistance(event)
     }
+    if (event.action === 'submitFeedback') {
+      return await handleSubmitFeedback(event)
+    }
     if (event.action === 'adminCreateOwnerRecoveryCode') {
       return await handleAdminCreateOwnerRecoveryCode(event)
     }
     if (event.action === 'adminListRooms') return await handleAdminListRooms(event)
+    if (event.action === 'adminListFeedback') {
+      return await handleAdminListFeedback(event)
+    }
+    if (event.action === 'adminUpdateFeedback') {
+      return await handleAdminUpdateFeedback(event)
+    }
+    if (event.action === 'adminGetFeedbackBark') {
+      return await handleAdminGetFeedbackBark(event)
+    }
+    if (event.action === 'adminSaveFeedbackBark') {
+      return await handleAdminSaveFeedbackBark(event)
+    }
 
     const context = await findAuthenticatedContext(event.memberToken)
     if (!context) return fail('AUTH_REQUIRED', '登录状态已失效，请重新绑定或恢复账号')

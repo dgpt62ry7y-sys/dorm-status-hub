@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted } from 'vue'
 import { Home, Settings, Users } from '@lucide/vue'
 import AccessGate from './components/AccessGate.vue'
 import CapacityNoticeDialog from './components/CapacityNoticeDialog.vue'
+import ClientUpdateDialog from './components/ClientUpdateDialog.vue'
 import LocalTestPanel from './components/LocalTestPanel.vue'
 import ReleaseNoticeDialog from './components/ReleaseNoticeDialog.vue'
 import RoomVerificationDialog from './components/RoomVerificationDialog.vue'
@@ -128,5 +129,6 @@ onMounted(() => {
     <LocalTestPanel />
     <DemoConsole v-if="demoMode" />
     <DemoNotificationToast v-if="demoMode" />
+    <ClientUpdateDialog />
   </div>
 </template>

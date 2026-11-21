@@ -7,12 +7,14 @@ import {
   ChevronDown,
   Info,
   LogOut,
+  MessageSquarePlus,
   ShieldCheck,
   UserRound,
 } from '@lucide/vue'
 import AccountDevicePanel from '../components/AccountDevicePanel.vue'
 import AppToast from '../components/AppToast.vue'
 import BarkNotificationPanel from '../components/BarkNotificationPanel.vue'
+import FeedbackDialog from '../components/FeedbackDialog.vue'
 import NotificationSettingsPanel from '../components/NotificationSettingsPanel.vue'
 import RecoveryAuditPanel from '../components/RecoveryAuditPanel.vue'
 import RoomCapacityPanel from '../components/RoomCapacityPanel.vue'
@@ -40,6 +42,9 @@ const toastVisible = ref(false)
 const saving = ref(false)
 const leaving = ref(false)
 const releaseLogOpen = ref(false)
+const feedbackOpen = ref(false)
+const feedbackEnabled =
+  !demoMode && import.meta.env.VITE_LOCAL_TEST_MODE !== 'true'
 let toastTimer: number | undefined
 
 function showToast(message: string): void {
@@ -105,10 +110,21 @@ onBeforeUnmount(() => {
           }}
         </p>
       </div>
-      <span class="profile-chip">
-        <UserRound :size="17" stroke-width="1.8" aria-hidden="true" />
-        {{ currentMember?.nickname }}
-      </span>
+      <div class="settings-hero-actions">
+        <button
+          v-if="feedbackEnabled"
+          type="button"
+          class="feedback-trigger"
+          @click="feedbackOpen = true"
+        >
+          <MessageSquarePlus :size="16" aria-hidden="true" />
+          反馈
+        </button>
+        <span class="profile-chip">
+          <UserRound :size="17" stroke-width="1.8" aria-hidden="true" />
+          {{ currentMember?.nickname }}
+        </span>
+      </div>
     </section>
 
     <div class="settings-layout">
@@ -287,5 +303,11 @@ onBeforeUnmount(() => {
     </div>
 
     <AppToast :message="toastMessage" :visible="toastVisible" />
+    <FeedbackDialog
+      v-if="feedbackEnabled"
+      :visible="feedbackOpen"
+      page="settings"
+      @close="feedbackOpen = false"
+    />
   </div>
 </template>

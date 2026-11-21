@@ -6,7 +6,10 @@ import type {
   DeviceListResult,
   DormState,
   DormStatus,
+  FeedbackPage,
+  FeedbackSubmitResult,
   NotificationSettings,
+  PublicConfig,
   RecoveryAuditEntry,
   RevokeDeviceResult,
   RoomCapacity,
@@ -103,6 +106,22 @@ async function callApi<T>(action: string, payload: Record<string, unknown> = {})
 }
 
 export const cloudDormApi = {
+  getPublicConfig() {
+    return callApi<PublicConfig>('getPublicConfig')
+  },
+
+  submitFeedback(input: {
+    items: string[]
+    contact: string
+    page: FeedbackPage
+    appVersion: string
+    deviceLabel: string
+    deviceInstanceId: string
+    memberToken?: string
+  }) {
+    return callApi<FeedbackSubmitResult>('submitFeedback', input)
+  },
+
   createRoom(input: {
     roomName: string
     nickname: string

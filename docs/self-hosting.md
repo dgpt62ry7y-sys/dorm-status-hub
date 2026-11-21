@@ -34,6 +34,7 @@
 - 为 iPhone/iPad 登记 Bark Device Key，接收同一份宿舍通知。
 - 将同一个成员账号绑定到手机和电脑。
 - 使用账号恢复码、临时协助恢复、设备管理、容量调整和版本更新公告。
+- 通过正式站创建页或设置页提交文字反馈。
 
 ## 架构说明
 
@@ -219,6 +220,7 @@ CloudBase CLI 会在输出中给出静态网站地址。
 - `joinRequests`
 - `temporaryRecoveryCodes`
 - `accountRecoveryAudit`
+- `feedbackEntries`
 
 这只会初始化项目内的集合，不会替你创建 CloudBase 环境、PostgreSQL 实例或 Document 扩展。
 
@@ -263,6 +265,8 @@ npm run admin
 如果房主丢失了所有已登录设备和长期恢复码，可以在管理站中针对指定宿舍生成一次性房主救援码。生成时需要再次输入 `DORMSYNC_CREATOR_KEY`。救援码 10 分钟有效、只能使用一次，并会写入账号恢复记录。
 
 管理站不能查询或导出任何成员的长期恢复码，因为数据库只保存恢复码哈希，服务端也无法还原原文。
+
+管理站还可以读取正式站反馈，并把独立 Bark Device Key 加密保存为自己的反馈通知通道。保存前会先发送真实测试通知。
 
 Windows 用户完成依赖安装和 `.env.local` 配置后，可以直接双击项目根目录的 `启动本地工具.bat`，从菜单选择管理站或六账号测试版。
 

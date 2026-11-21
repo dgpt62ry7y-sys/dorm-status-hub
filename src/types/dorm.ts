@@ -16,6 +16,20 @@ export interface ReleaseNotice {
   items: string[]
 }
 
+export interface PublicConfig {
+  releaseVersion: string
+  feedbackEnabled: boolean
+}
+
+export type FeedbackPage = 'creation' | 'settings'
+
+export interface FeedbackSubmitResult {
+  id: string
+  submittedAt: string
+  barkConfigured: boolean
+  barkDelivered: boolean
+}
+
 export interface RoomVerification {
   required: boolean
   isOwner: boolean
