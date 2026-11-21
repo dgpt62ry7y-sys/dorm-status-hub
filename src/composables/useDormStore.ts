@@ -29,17 +29,73 @@ export interface SecretDialogState {
 
 const TOKEN_KEY = 'dormsync:member-token:v1'
 const REFRESH_TOKEN_BACKUP_KEY = 'dormsync:refresh-token:v1'
+const REFRESH_TOKEN_COOKIE = 'dormsync_refresh_token_v1'
+const REFRESH_TOKEN_MAX_AGE_MS = 5 * 60 * 1000
 const NOTIFICATION_TOPIC_SEEN_KEY = 'dormsync:notification-topic-seen:v1'
 const LOCAL_RECOVERY_CODE_KEY = 'dormsync:local-test-recovery-code:v1'
 const POLL_INTERVAL_MS = 5000
 const REALTIME_REFRESH_DEBOUNCE_MS = 180
 
+function readCookie(name: string): string {
+  const prefix = `${name}=`
+  const entry = document.cookie
+    .split(';')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix))
+  return entry ? decodeURIComponent(entry.slice(prefix.length)) : ''
+}
+
+function parseRefreshBackup(value: string): string {
+  if (!value) return ''
+  try {
+    const parsed = JSON.parse(value) as { token?: string; expiresAt?: number }
+    if (
+      parsed.token &&
+      Number(parsed.expiresAt || 0) > Date.now()
+    ) {
+      return parsed.token
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+function clearRefreshBackup(): void {
+  localStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
+  sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${REFRESH_TOKEN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`
+}
+
+function storeRefreshBackup(token: string): void {
+  if (!token) return
+  const value = JSON.stringify({
+    token,
+    expiresAt: Date.now() + REFRESH_TOKEN_MAX_AGE_MS,
+  })
+  localStorage.setItem(REFRESH_TOKEN_BACKUP_KEY, value)
+  sessionStorage.setItem(REFRESH_TOKEN_BACKUP_KEY, value)
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${REFRESH_TOKEN_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=300; SameSite=Lax${secure}`
+}
+
 function restoreRefreshToken(): string {
   const stored = localStorage.getItem(TOKEN_KEY) || ''
   if (stored) return stored
-  const backup = sessionStorage.getItem(REFRESH_TOKEN_BACKUP_KEY) || ''
-  if (backup) localStorage.setItem(TOKEN_KEY, backup)
-  return backup
+  const candidates = [
+    sessionStorage.getItem(REFRESH_TOKEN_BACKUP_KEY) || '',
+    localStorage.getItem(REFRESH_TOKEN_BACKUP_KEY) || '',
+    readCookie(REFRESH_TOKEN_COOKIE),
+  ]
+  for (const candidate of candidates) {
+    const token = parseRefreshBackup(candidate)
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token)
+      return token
+    }
+  }
+  return ''
 }
 
 function createEmptyState(): DormState {
@@ -142,7 +198,7 @@ function applyState(next: DormState): void {
 function saveSession(token: string, next: DormState): void {
   memberToken.value = token
   localStorage.setItem(TOKEN_KEY, token)
-  sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
+  clearRefreshBackup()
   applyState(next)
   phase.value = 'ready'
   actionError.value = ''
@@ -156,7 +212,7 @@ function clearSession(): void {
   const storedToken = localStorage.getItem(TOKEN_KEY)
   const failedToken = memberToken.value
   if (storedToken === failedToken) localStorage.removeItem(TOKEN_KEY)
-  sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
+  clearRefreshBackup()
   memberToken.value = ''
   Object.assign(state, createEmptyState())
   phase.value = 'onboarding'
@@ -495,7 +551,7 @@ async function initialize(): Promise<void> {
   try {
     const next = await getInitialState(memberToken.value)
     applyState(next)
-    sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
+    clearRefreshBackup()
     initialServerVersion.value = next.serverVersion || ''
     phase.value = 'ready'
     isOnline.value = true
@@ -767,9 +823,9 @@ async function refreshToLatest(): Promise<void> {
     const registration = await navigator.serviceWorker?.getRegistration()
     await registration?.update()
   } finally {
-    if (memberToken.value) {
-      sessionStorage.setItem(REFRESH_TOKEN_BACKUP_KEY, memberToken.value)
-    }
+    storeRefreshBackup(
+      memberToken.value || localStorage.getItem(TOKEN_KEY) || '',
+    )
     const url = new URL(window.location.href)
     url.searchParams.set('refresh', String(Date.now()))
     window.location.replace(url.toString())

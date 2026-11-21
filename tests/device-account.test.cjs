@@ -49,6 +49,12 @@ async function run() {
   if (!storeSource.includes('if (storedToken === failedToken) localStorage.removeItem(TOKEN_KEY)')) {
     throw new Error('Cross-tab session cleanup guard is missing')
   }
+  if (
+    !storeSource.includes('REFRESH_TOKEN_COOKIE') ||
+    !storeSource.includes('storeRefreshBackup')
+  ) {
+    throw new Error('Refresh session backup protection is missing')
+  }
 
   const suffix = String(Date.now()).slice(-6)
   const created = ok(
@@ -585,6 +591,7 @@ async function run() {
         latestCapacityNoticeOnly: true,
         legacyTokenMigration: true,
         crossTabSessionCleanupGuard: true,
+        refreshSessionBackupGuard: true,
       },
       null,
       2,
