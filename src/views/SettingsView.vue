@@ -98,10 +98,21 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page settings-page">
-    <section class="page-hero page-hero--compact">
-      <div>
+    <section class="page-hero page-hero--compact settings-hero">
+      <div class="settings-hero-copy">
         <p class="eyebrow">宿舍状态共享站 / {{ state.room.name }}</p>
-        <h1>设置</h1>
+        <div class="settings-title-row">
+          <h1>设置</h1>
+          <button
+            v-if="feedbackEnabled"
+            type="button"
+            class="feedback-trigger"
+            @click="feedbackOpen = true"
+          >
+            <MessageSquarePlus :size="16" aria-hidden="true" />
+            反馈
+          </button>
+        </div>
         <p class="page-intro">
           {{
             demoMode
@@ -109,17 +120,6 @@ onBeforeUnmount(() => {
               : '管理称呼、默认状态、账号恢复和登录设备。'
           }}
         </p>
-      </div>
-      <div class="settings-hero-actions">
-        <button
-          v-if="feedbackEnabled"
-          type="button"
-          class="feedback-trigger"
-          @click="feedbackOpen = true"
-        >
-          <MessageSquarePlus :size="16" aria-hidden="true" />
-          反馈
-        </button>
         <span class="profile-chip">
           <UserRound :size="17" stroke-width="1.8" aria-hidden="true" />
           {{ currentMember?.nickname }}

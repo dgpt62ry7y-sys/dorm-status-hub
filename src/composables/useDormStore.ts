@@ -28,10 +28,19 @@ export interface SecretDialogState {
 }
 
 const TOKEN_KEY = 'dormsync:member-token:v1'
+const REFRESH_TOKEN_BACKUP_KEY = 'dormsync:refresh-token:v1'
 const NOTIFICATION_TOPIC_SEEN_KEY = 'dormsync:notification-topic-seen:v1'
 const LOCAL_RECOVERY_CODE_KEY = 'dormsync:local-test-recovery-code:v1'
 const POLL_INTERVAL_MS = 5000
 const REALTIME_REFRESH_DEBOUNCE_MS = 180
+
+function restoreRefreshToken(): string {
+  const stored = localStorage.getItem(TOKEN_KEY) || ''
+  if (stored) return stored
+  const backup = sessionStorage.getItem(REFRESH_TOKEN_BACKUP_KEY) || ''
+  if (backup) localStorage.setItem(TOKEN_KEY, backup)
+  return backup
+}
 
 function createEmptyState(): DormState {
   return {
@@ -57,7 +66,7 @@ function createEmptyState(): DormState {
 
 const state = reactive<DormState>(createEmptyState())
 const phase = ref<StorePhase>('loading')
-const memberToken = ref(localStorage.getItem(TOKEN_KEY) || '')
+const memberToken = ref(restoreRefreshToken())
 const actionError = ref('')
 const isOnline = ref(navigator.onLine)
 const isSyncing = ref(false)
@@ -133,6 +142,7 @@ function applyState(next: DormState): void {
 function saveSession(token: string, next: DormState): void {
   memberToken.value = token
   localStorage.setItem(TOKEN_KEY, token)
+  sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
   applyState(next)
   phase.value = 'ready'
   actionError.value = ''
@@ -146,6 +156,7 @@ function clearSession(): void {
   const storedToken = localStorage.getItem(TOKEN_KEY)
   const failedToken = memberToken.value
   if (storedToken === failedToken) localStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
   memberToken.value = ''
   Object.assign(state, createEmptyState())
   phase.value = 'onboarding'
@@ -484,6 +495,7 @@ async function initialize(): Promise<void> {
   try {
     const next = await getInitialState(memberToken.value)
     applyState(next)
+    sessionStorage.removeItem(REFRESH_TOKEN_BACKUP_KEY)
     initialServerVersion.value = next.serverVersion || ''
     phase.value = 'ready'
     isOnline.value = true
@@ -755,6 +767,9 @@ async function refreshToLatest(): Promise<void> {
     const registration = await navigator.serviceWorker?.getRegistration()
     await registration?.update()
   } finally {
+    if (memberToken.value) {
+      sessionStorage.setItem(REFRESH_TOKEN_BACKUP_KEY, memberToken.value)
+    }
     const url = new URL(window.location.href)
     url.searchParams.set('refresh', String(Date.now()))
     window.location.replace(url.toString())
