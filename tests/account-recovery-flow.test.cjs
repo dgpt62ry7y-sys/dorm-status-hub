@@ -192,7 +192,7 @@ async function run() {
       deviceLabel: 'Member Assistance Reuse',
       deviceInstanceId: crypto.randomUUID(),
     }),
-    'RECOVERY_CODE_INVALID',
+    'RECOVERY_CODE_USED',
   )
 
   const ownerCodeA = ok(

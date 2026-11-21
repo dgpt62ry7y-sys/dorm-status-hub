@@ -391,22 +391,6 @@ textarea:focus-visible {
   font-size: 10px;
 }
 
-.access-recovery-help {
-  margin: -3px 0 0;
-  padding: 11px 13px;
-  border: 1px solid #ddd9cf;
-  border-radius: 10px;
-  background: #f3f0e8;
-  color: var(--ink-soft);
-  font-size: 10px;
-  line-height: 1.65;
-}
-
-.access-recovery-help code {
-  color: var(--ink);
-  font-weight: 700;
-}
-
 .access-form {
   display: grid;
   gap: 17px;

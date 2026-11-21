@@ -427,12 +427,6 @@ async function submit(): Promise<void> {
               />
             </label>
 
-            <p v-if="recoveryRole === 'admin'" class="access-recovery-help">
-              请先在电脑上运行
-              <code>启动本地工具.bat</code>
-              ，选择只读管理站，验证后为对应宿舍生成救援码。
-            </p>
-
             <label v-if="recoveryRole === 'owner'" class="field">
               <span class="field__label">
                 <KeyRound :size="16" aria-hidden="true" />

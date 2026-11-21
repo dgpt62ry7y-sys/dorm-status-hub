@@ -226,6 +226,7 @@ async function run() {
   if (
     adminRescue.code.length !== 16 ||
     adminRescue.type !== 'owner_admin_rescue' ||
+    adminRescue.inviteCode !== created.state.room.inviteCode ||
     Date.parse(adminRescue.expiresAt) <= Date.now()
   ) {
     throw new Error('Admin owner recovery code is invalid')
@@ -256,7 +257,7 @@ async function run() {
       deviceInstanceId: crypto.randomUUID(),
       clientIp: 'admin-rescue-ip',
     }),
-    'RECOVERY_CODE_INVALID',
+    'RECOVERY_CODE_USED',
   )
   const rescueAudit = database.data
     .get('accountRecoveryAudit')

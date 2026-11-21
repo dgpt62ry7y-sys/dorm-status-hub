@@ -17,7 +17,6 @@ const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['joinRoom', { scope: 'join-room', maxAttempts: 30 }],
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
   ['recoverAccount', { scope: 'recover-account', maxAttempts: 10 }],
-  ['recoverWithAssistance', { scope: 'recover-with-assistance', maxAttempts: 10 }],
 ])
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
@@ -830,6 +829,20 @@ function temporaryRecoveryDocumentId(code) {
   return hashToken(`temporary-recovery:${normalizeSecret(code)}`)
 }
 
+async function getTemporaryRecoveryCodeDocument(code) {
+  const normalized = normalizeSecret(code)
+  const result = await db
+    .collection('temporaryRecoveryCodes')
+    .where({ codeHash: hashToken(normalized) })
+    .limit(1)
+    .get()
+  if (result.data[0]) return result.data[0]
+  return getDocument(
+    'temporaryRecoveryCodes',
+    temporaryRecoveryDocumentId(normalized),
+  )
+}
+
 async function completeRecoveryInTransaction(
   transaction,
   {
@@ -840,12 +853,16 @@ async function completeRecoveryInTransaction(
     actorMemberId,
     generatorMemberIds = [],
     generatorNicknames = [],
+    skipMemberValidation = false,
   },
 ) {
-  const memberResult = await transaction.collection('members').doc(member._id).get()
-  const activeMember = memberResult.data?.[0]
-  if (!activeMember?.active || activeMember.roomId !== member.roomId) {
-    throw new Error('RECOVERY_TARGET_INVALID')
+  let activeMember = member
+  if (!skipMemberValidation) {
+    const memberResult = await transaction.collection('members').doc(member._id).get()
+    activeMember = memberResult.data?.[0]
+    if (!activeMember?.active || activeMember.roomId !== member.roomId) {
+      throw new Error('RECOVERY_TARGET_INVALID')
+    }
   }
 
   const sessionsResult = await transaction
@@ -920,7 +937,7 @@ async function issueTemporaryRecoveryCode({
   type,
 }) {
   const code = createTemporaryRecoveryCode()
-  const codeId = temporaryRecoveryDocumentId(code)
+  const codeHash = hashToken(code)
   const createdAt = nowIso()
   const expiresAt = new Date(Date.now() + TEMP_RECOVERY_TTL_MS).toISOString()
   const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
@@ -945,12 +962,13 @@ async function issueTemporaryRecoveryCode({
         }),
       ),
     )
-    await transaction.collection('temporaryRecoveryCodes').doc(codeId).set({
+    await transaction.collection('temporaryRecoveryCodes').add({
       roomId: room._id,
       targetMemberId: targetMember._id,
       targetNickname: targetMember.nickname,
       generatorMemberId: generatorMember._id,
       generatorNickname: generatorMember.nickname,
+      codeHash,
       type,
       inviteCodeHash,
       active: true,
@@ -1845,16 +1863,95 @@ async function handleCreateOwnerRecoveryCode(_event, currentMember) {
   )
 }
 
+async function handleAdminOwnerRescueRecovery(event, room) {
+  if (!room) {
+    return fail('ROOM_NOT_FOUND', '宿舍分享号不正确或已经失效')
+  }
+
+  const code = normalizeSecret(
+    Array.isArray(event.recoveryCodes) ? event.recoveryCodes[0] : '',
+  )
+  const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
+  if (code.length !== 16 || !deviceInstanceId) {
+    return fail('RECOVERY_CODE_INVALID', '救援码格式不正确，请重新输入')
+  }
+
+  const rescue = room.adminRescue
+  const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
+  if (
+    !rescue ||
+    rescue.type !== 'owner_admin_rescue' ||
+    rescue.codeHash !== hashToken(code) ||
+    rescue.roomId !== room._id ||
+    rescue.inviteCodeHash !== inviteCodeHash
+  ) {
+    return fail('RECOVERY_CODE_INVALID', '救援码无效，请重新生成')
+  }
+  if (rescue.usedAt) {
+    return fail('RECOVERY_CODE_USED', '救援码已经使用过，请重新生成')
+  }
+  if (!rescue.active) {
+    return fail('RECOVERY_CODE_INVALID', '救援码已经失效，请重新生成')
+  }
+  if (Date.parse(rescue.expiresAt || '') <= Date.now()) {
+    return fail('RECOVERY_CODE_EXPIRED', '救援码已经过期，请重新生成')
+  }
+
+  const target = await getDocument('members', rescue.targetMemberId)
+  if (!target?.active || target.roomId !== room._id || room.ownerId !== target._id) {
+    return fail('RECOVERY_CODE_INVALID', '房主账号当前不可恢复')
+  }
+
+  try {
+    const recovered = await db.runTransaction((transaction) =>
+      completeRecoveryInTransaction(transaction, {
+        member: target,
+        deviceInstanceId,
+        requestedDeviceLabel: event.deviceLabel,
+        method: 'owner_admin_rescue',
+        actorMemberId: target._id,
+        generatorMemberIds: [],
+        generatorNicknames: ['本地管理台'],
+        skipMemberValidation: true,
+      }),
+    )
+    await db.collection('rooms').doc(room._id).update({
+      adminRescue: {
+        ...rescue,
+        active: false,
+        usedAt: nowIso(),
+      },
+      updatedAt: nowIso(),
+    })
+    return await finishRecovery(room, recovered)
+  } catch (error) {
+    if (error.message === 'RECOVERY_CODE_USED') {
+      return fail('RECOVERY_CODE_USED', '救援码已经使用过，请重新生成')
+    }
+    if (error.message === 'RECOVERY_CODE_EXPIRED') {
+      return fail('RECOVERY_CODE_EXPIRED', '救援码已经过期，请重新生成')
+    }
+    if (error.message === 'RECOVERY_CODE_INVALID') {
+      return fail('RECOVERY_CODE_INVALID', '救援码无效，请重新生成')
+    }
+    throw error
+  }
+}
+
 async function handleRecoverWithAssistance(event) {
   const room = await getRoomByInviteCode(normalizeInviteCode(event.inviteCode))
   const mode = String(event.recoveryMode || '')
+  if (mode === 'admin') {
+    return await handleAdminOwnerRescueRecovery(event, room)
+  }
   const deviceInstanceId = normalizeDeviceInstanceId(event.deviceInstanceId)
   const rawCodes = Array.isArray(event.recoveryCodes) ? event.recoveryCodes : []
   const codes = rawCodes.map(normalizeSecret)
-  const expectedCount =
-    mode === 'owner' ? 2 : mode === 'member' || mode === 'admin' ? 1 : 0
+  const expectedCount = mode === 'owner' ? 2 : mode === 'member' ? 1 : 0
+  if (!room) {
+    return fail('ROOM_NOT_FOUND', '宿舍分享号不正确或已经失效')
+  }
   if (
-    !room ||
     !deviceInstanceId ||
     !expectedCount ||
     codes.length !== expectedCount ||
@@ -1864,15 +1961,10 @@ async function handleRecoverWithAssistance(event) {
     return fail('RECOVERY_CODE_INVALID', '临时恢复码无效，请检查后重试')
   }
 
-  const type =
-    mode === 'owner'
-      ? 'owner_assist'
-      : mode === 'admin'
-        ? 'owner_admin_rescue'
-        : 'member_assist'
+  const type = mode === 'owner' ? 'owner_assist' : 'member_assist'
   const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
   const codeDocuments = await Promise.all(
-    codes.map((code) => getDocument('temporaryRecoveryCodes', temporaryRecoveryDocumentId(code))),
+    codes.map((code) => getTemporaryRecoveryCodeDocument(code)),
   )
   if (
     codeDocuments.some(
@@ -1887,6 +1979,13 @@ async function handleRecoverWithAssistance(event) {
         Date.parse(item.expiresAt || '') <= Date.now(),
     )
   ) {
+    const matched = codeDocuments.find(Boolean)
+    if (matched?.usedAt) {
+      return fail('RECOVERY_CODE_USED', '救援码已经使用过，请重新生成')
+    }
+    if (matched && Date.parse(matched.expiresAt || '') <= Date.now()) {
+      return fail('RECOVERY_CODE_EXPIRED', '救援码已经过期，请重新生成')
+    }
     return fail('RECOVERY_CODE_INVALID', '临时恢复码无效或已经过期')
   }
 
@@ -1906,31 +2005,18 @@ async function handleRecoverWithAssistance(event) {
 
   const memberDocuments = await Promise.all([
     getDocument('members', targetMemberId),
-    ...(mode === 'admin'
-      ? []
-      : generatorIds.map((memberId) => getDocument('members', memberId))),
+    ...generatorIds.map((memberId) => getDocument('members', memberId)),
   ])
   const [target, ...generators] = memberDocuments
   if (!target?.active || target.roomId !== room._id) {
     return fail('RECOVERY_CODE_INVALID', '目标成员账号不可用')
   }
-  if (
-    mode !== 'admin' &&
-    generators.some((member) => !member?.active || member.roomId !== room._id)
-  ) {
+  if (generators.some((member) => !member?.active || member.roomId !== room._id)) {
     return fail('RECOVERY_CODE_INVALID', '确认成员账号不可用')
   }
   if (mode === 'member') {
     if (room.ownerId !== generatorIds[0] || target.role === 'owner') {
       return fail('RECOVERY_CODE_INVALID', '成员临时恢复码无效')
-    }
-  } else if (mode === 'admin') {
-    if (
-      room.ownerId !== target._id ||
-      target.role !== 'owner' ||
-      generatorIds[0] !== 'local-admin'
-    ) {
-      return fail('RECOVERY_CODE_INVALID', '房主救援码无效')
     }
   } else if (
     room.ownerId !== target._id ||
@@ -1999,18 +2085,10 @@ async function handleRecoverWithAssistance(event) {
         member: currentTarget,
         deviceInstanceId,
         requestedDeviceLabel: event.deviceLabel,
-        method:
-          mode === 'owner'
-            ? 'owner_assistance'
-            : mode === 'admin'
-              ? 'owner_admin_rescue'
-              : 'member_assistance',
+        method: mode === 'owner' ? 'owner_assistance' : 'member_assistance',
         actorMemberId: target._id,
-        generatorMemberIds: mode === 'admin' ? [] : generatorIds,
-        generatorNicknames:
-          mode === 'admin'
-            ? ['本地管理台']
-            : generators.map((member) => member.nickname),
+        generatorMemberIds: generatorIds,
+        generatorNicknames: generators.map((member) => member.nickname),
       })
       const usedAt = nowIso()
       await Promise.all(
@@ -2066,19 +2144,47 @@ async function handleAdminCreateOwnerRecoveryCode(event) {
     return fail('OWNER_NOT_FOUND', '当前房主账号不可用')
   }
 
-  const issued = await issueTemporaryRecoveryCode({
-    room,
-    targetMember: owner,
-    generatorMember: {
-      _id: 'local-admin',
-      nickname: '本地管理台',
-    },
+  const code = createTemporaryRecoveryCode()
+  const createdAt = nowIso()
+  const expiresAt = new Date(Date.now() + TEMP_RECOVERY_TTL_MS).toISOString()
+  const inviteCodeHash = room.inviteCodeHash || hashToken(room.inviteCode)
+  const adminRescue = {
     type: 'owner_admin_rescue',
+    codeHash: hashToken(code),
+    roomId: room._id,
+    inviteCodeHash,
+    targetMemberId: owner._id,
+    active: true,
+    usedAt: null,
+    createdAt,
+    expiresAt,
+  }
+
+  await db.collection('rooms').doc(room._id).update({
+    adminRescue,
+    updatedAt: createdAt,
   })
+  await db.collection('accountRecoveryAudit').add({
+    roomId: room._id,
+    targetMemberId: owner._id,
+    targetNickname: owner.nickname,
+    actorMemberId: 'local-admin',
+    actorNickname: '本地管理台',
+    generatorMemberIds: [],
+    generatorNicknames: ['本地管理台'],
+    eventType: 'code_generated',
+    method: 'owner_admin_rescue',
+    createdAt,
+  })
+
   return ok({
-    ...issued,
+    code,
+    expiresAt,
+    targetNickname: owner.nickname,
+    type: 'owner_admin_rescue',
     roomName: room.name,
     ownerNickname: owner.nickname,
+    inviteCode: room.inviteCode,
   })
 }
 

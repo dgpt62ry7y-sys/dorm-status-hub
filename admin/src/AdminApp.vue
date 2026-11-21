@@ -34,6 +34,7 @@ interface AdminRescueResult {
   expiresAt: string
   roomName: string
   ownerNickname: string
+  inviteCode: string
 }
 
 const apiUrl = import.meta.env.VITE_DORMSYNC_API_URL
@@ -164,6 +165,7 @@ async function createRescueCode(): Promise<void> {
       expiresAt: result.data.expiresAt,
       roomName: result.data.roomName,
       ownerNickname: result.data.ownerNickname,
+      inviteCode: result.data.inviteCode,
     }
     rescueCreatorKey.value = ''
   } catch (error) {
@@ -433,6 +435,12 @@ onBeforeUnmount(() => {
                   <Copy v-else :size="16" aria-hidden="true" />
                   {{ rescueCopied ? '已复制' : '复制' }}
                 </button>
+              </div>
+
+              <div class="admin-rescue-share">
+                <span>宿舍分享号</span>
+                <strong>{{ rescueResult.inviteCode }}</strong>
+                <small>恢复时同时输入这个分享号和上面的救援码。</small>
               </div>
 
               <div class="admin-rescue-expiry">
