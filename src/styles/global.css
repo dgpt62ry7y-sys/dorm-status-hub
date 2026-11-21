@@ -5695,11 +5695,15 @@ textarea:focus-visible {
 }
 
 .settings-hero {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
   align-items: flex-start;
 }
 
 .settings-hero-copy {
   width: 100%;
+  min-width: 0;
 }
 
 .settings-title-row {
