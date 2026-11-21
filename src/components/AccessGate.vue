@@ -15,6 +15,7 @@ import {
 import { useDormStore } from '../composables/useDormStore'
 import { DORMSYNC_API_URL } from '../config/cloudbase'
 import type { RoomCapacity } from '../types/dorm'
+import { getLastRoomHint } from '../utils/lastRoom'
 
 const {
   phase,
@@ -32,12 +33,15 @@ type RecoveryMethod = 'code' | 'assistance'
 type RecoveryMode = 'member' | 'owner' | 'admin'
 
 const inviteFromUrl = new URLSearchParams(window.location.search).get('invite') || ''
-const mode = ref<AccessMode>(inviteFromUrl ? 'entry' : 'create')
+const lastRoomHint = getLastRoomHint()
+const initialInviteCode = (inviteFromUrl || lastRoomHint?.inviteCode || '').toUpperCase()
+const hasKnownRoom = Boolean(initialInviteCode)
+const mode = ref<AccessMode>(hasKnownRoom ? 'entry' : 'create')
 const recoveryMethod = ref<RecoveryMethod>('code')
 const recoveryRole = ref<RecoveryMode>('member')
 const roomName = ref('')
 const nickname = ref('')
-const inviteCode = ref(inviteFromUrl.toUpperCase())
+const inviteCode = ref(initialInviteCode)
 const accountCode = ref('')
 const assistanceCodeOne = ref('')
 const assistanceCodeTwo = ref('')
@@ -58,7 +62,10 @@ const submitLabel = computed(() => {
 
 const intro = computed(() => {
   if (mode.value === 'entry') {
-    return '这个链接已经带上宿舍分享号。请选择你是第一次加入，还是恢复以前使用过的账号。'
+    if (inviteFromUrl) {
+      return '这个链接已经带上宿舍分享号。请选择你是第一次加入，还是恢复以前使用过的账号。'
+    }
+    return '我们找到了你上次使用的宿舍。请选择恢复已有账号；如果这是另一位室友的设备，再选择第一次加入。'
   }
   if (mode.value === 'bind') {
     return '输入原设备生成的 8 位绑定码，让这台设备共享同一个成员身份。'
@@ -219,7 +226,13 @@ async function submit(): Promise<void> {
 
       <section v-if="mode === 'entry'" class="access-entry">
         <div class="access-entry__share">
-          <small>宿舍分享号</small>
+          <small>
+            {{
+              lastRoomHint?.roomName
+                ? `上次使用 · ${lastRoomHint.roomName}`
+                : '宿舍分享号'
+            }}
+          </small>
           <strong>{{ inviteCode }}</strong>
         </div>
         <div class="access-entry__actions">
@@ -463,7 +476,7 @@ async function submit(): Promise<void> {
           <button
             type="button"
             class="text-button"
-            @click="switchMode(inviteFromUrl ? 'entry' : 'create')"
+            @click="switchMode(hasKnownRoom ? 'entry' : 'create')"
           >
             <ArrowLeft :size="15" aria-hidden="true" />
             返回登录

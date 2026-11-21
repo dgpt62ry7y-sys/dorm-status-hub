@@ -15,6 +15,7 @@ import {
   getDeviceInstanceId,
   getDeviceLabel,
 } from '../utils/device'
+import { saveLastRoomHint } from '../utils/lastRoom'
 
 export type StorePhase = 'loading' | 'onboarding' | 'ready' | 'error'
 
@@ -109,6 +110,16 @@ function applyState(next: DormState): void {
   state.members = next.members
   state.statuses = next.statuses
   state.preferences = next.preferences
+  const currentMember = next.members.find(
+    (member) => member.id === next.currentMemberId,
+  )
+  if (next.room.inviteCode) {
+    saveLastRoomHint({
+      inviteCode: next.room.inviteCode,
+      roomName: next.room.name,
+      nickname: currentMember?.nickname || '',
+    })
+  }
   lastSyncedAt.value = new Date().toISOString()
   if (next.capacityNotice) capacityNoticeDialog.value = next.capacityNotice
   if (next.releaseNotice) releaseNoticeDialog.value = next.releaseNotice

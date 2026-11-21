@@ -2109,6 +2109,7 @@ textarea:focus-visible {
 
 .field {
   display: grid;
+  min-width: 0;
   gap: 9px;
 }
 
@@ -2147,6 +2148,8 @@ textarea:focus-visible {
 .field input,
 .field textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fffefa;
@@ -2160,6 +2163,12 @@ textarea:focus-visible {
 .field input {
   min-height: 48px;
   padding: 0 13px;
+}
+
+.field input[type="time"] {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 100%;
 }
 
 .field textarea {
@@ -2462,6 +2471,77 @@ textarea:focus-visible {
   color: var(--ink-soft);
   font-size: 11px;
   line-height: 1.65;
+}
+
+.recovery-audit {
+  gap: 0;
+}
+
+.recovery-audit__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 0 18px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.recovery-audit__toggle > span:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.recovery-audit__toggle small {
+  color: var(--ink-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.recovery-audit__toggle strong {
+  font-family: "Iowan Old Style", "Baskerville", "Songti SC", "Noto Serif CJK SC", serif;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.recovery-audit__toggle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.recovery-audit__chevron {
+  color: var(--ink-faint);
+  transition: transform 180ms ease;
+}
+
+.recovery-audit__chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.recovery-audit__body {
+  padding-top: 18px;
+}
+
+.recovery-audit-expand-enter-active,
+.recovery-audit-expand-leave-active {
+  overflow: hidden;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.recovery-audit-expand-enter-from,
+.recovery-audit-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
 }
 
 .recovery-audit__badge {

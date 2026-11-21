@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { LoaderCircle, ShieldCheck } from '@lucide/vue'
+import { computed, ref } from 'vue'
+import { ChevronDown, LoaderCircle, ShieldCheck } from '@lucide/vue'
 import { useDormStore } from '../composables/useDormStore'
 import type { RecoveryAuditEntry } from '../types/dorm'
 
@@ -8,6 +8,8 @@ const { isOwner, listRecoveryAudit } = useDormStore()
 const demoMode = __DEMO_MODE__
 const entries = ref<RecoveryAuditEntry[]>([])
 const loading = ref(false)
+const loaded = ref(false)
+const expanded = ref(false)
 const errorMessage = ref('')
 
 const visible = computed(() => isOwner.value && !demoMode)
@@ -44,6 +46,7 @@ async function load(): Promise<void> {
   try {
     const result = await listRecoveryAudit()
     entries.value = result.entries
+    loaded.value = true
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '账号恢复记录读取失败'
@@ -52,9 +55,10 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void load()
-})
+function toggle(): void {
+  expanded.value = !expanded.value
+  if (expanded.value && !loaded.value && !loading.value) void load()
+}
 </script>
 
 <template>
@@ -63,45 +67,63 @@ onMounted(() => {
     class="settings-section recovery-audit"
     aria-labelledby="recovery-audit-heading"
   >
-    <div class="settings-section__heading">
-      <div>
-        <p class="eyebrow">仅房主可见</p>
-        <h2 id="recovery-audit-heading">账号恢复记录</h2>
-      </div>
-      <span class="recovery-audit__badge">
-        <ShieldCheck :size="15" aria-hidden="true" />
-        安全记录
+    <button
+      type="button"
+      class="recovery-audit__toggle"
+      :aria-expanded="expanded"
+      aria-controls="recovery-audit-content"
+      @click="toggle"
+    >
+      <span>
+        <small>仅房主可见</small>
+        <strong id="recovery-audit-heading">账号恢复记录</strong>
       </span>
-    </div>
+      <span class="recovery-audit__toggle-meta">
+        <span class="recovery-audit__badge">
+          <ShieldCheck :size="15" aria-hidden="true" />
+          安全记录
+        </span>
+        <ChevronDown
+          class="recovery-audit__chevron"
+          :class="{ expanded }"
+          :size="18"
+          aria-hidden="true"
+        />
+      </span>
+    </button>
 
-    <p class="recovery-audit__intro">
-      记录临时恢复码的生成和账号恢复结果，不保存任何恢复码、令牌或设备凭证。
-    </p>
-
-    <div v-if="loading" class="notification-loading">
-      <LoaderCircle class="spin" :size="17" aria-hidden="true" />
-      正在读取恢复记录
-    </div>
-    <p v-else-if="errorMessage" class="form-error">{{ errorMessage }}</p>
-    <p v-else-if="entries.length === 0" class="recovery-audit__empty">
-      暂无账号恢复记录。
-    </p>
-    <div v-else class="recovery-audit__list">
-      <article v-for="entry in entries" :key="entry.id">
-        <div>
-          <strong>{{ eventLabel(entry) }}</strong>
-          <time :datetime="entry.createdAt">{{ formatAuditTime(entry.createdAt) }}</time>
-        </div>
-        <p>
-          目标：{{ entry.targetNickname }}
-          <template v-if="entry.actorNickname">
-            · 操作者：{{ entry.actorNickname }}
-          </template>
+    <Transition name="recovery-audit-expand">
+      <div v-if="expanded" id="recovery-audit-content" class="recovery-audit__body">
+        <p class="recovery-audit__intro">
+          记录临时恢复码的生成和账号恢复结果，不保存任何恢复码、令牌或设备凭证。
         </p>
-        <small v-if="entry.generatorNicknames.length">
-          确认成员：{{ entry.generatorNicknames.join('、') }}
-        </small>
-      </article>
-    </div>
+
+        <div v-if="loading" class="notification-loading">
+          <LoaderCircle class="spin" :size="17" aria-hidden="true" />
+          正在读取恢复记录
+        </div>
+        <p v-else-if="errorMessage" class="form-error">{{ errorMessage }}</p>
+        <p v-else-if="entries.length === 0" class="recovery-audit__empty">
+          暂无账号恢复记录。
+        </p>
+        <div v-else class="recovery-audit__list">
+          <article v-for="entry in entries" :key="entry.id">
+            <div>
+              <strong>{{ eventLabel(entry) }}</strong>
+              <time :datetime="entry.createdAt">{{ formatAuditTime(entry.createdAt) }}</time>
+            </div>
+            <p>
+              目标：{{ entry.targetNickname }}
+              <template v-if="entry.actorNickname">
+                · 操作者：{{ entry.actorNickname }}
+              </template>
+            </p>
+            <small v-if="entry.generatorNicknames.length">
+              确认成员：{{ entry.generatorNicknames.join('、') }}
+            </small>
+          </article>
+        </div>
+      </div>
+    </Transition>
   </section>
 </template>
