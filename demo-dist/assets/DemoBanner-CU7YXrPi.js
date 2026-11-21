@@ -1,1 +1,0 @@
-import{o as a,c,a as n}from"./main-EtwR8857.js";import"./index-C1n77m7L.js";const l=(t,e)=>{const o=t.__vccOpts||t;for(const[r,s]of e)o[r]=s;return o},_={},p={class:"demo-banner",role:"status"};function d(t,e){return a(),c("div",p,[...e[0]||(e[0]=[n("span",null,"体验版",-1),n("p",null,"当前为虚拟六人寝，不连接正式数据；刷新页面后会自动恢复演示内容。",-1)])])}const u=l(_,[["render",d]]);export{u as default};

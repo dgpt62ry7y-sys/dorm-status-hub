@@ -18,7 +18,6 @@ const PUBLIC_ACTION_RATE_LIMITS = new Map([
   ['claimDeviceLink', { scope: 'claim-device-link', maxAttempts: 20 }],
   ['recoverAccount', { scope: 'recover-account', maxAttempts: 10 }],
   ['recoverWithAssistance', { scope: 'recover-with-assistance', maxAttempts: 10 }],
-  ['adminCreateOwnerRecoveryCode', { scope: 'admin-owner-recovery', maxAttempts: 5 }],
 ])
 const EXISTING_ROOM_VERIFY_MS = 12 * 60 * 60 * 1000
 const EXISTING_ROOM_FALLBACK_MS = 3 * 24 * 60 * 60 * 1000
@@ -696,7 +695,13 @@ async function consumePublicActionRateLimit(event, action) {
   return true
 }
 
-async function verifyConfiguredSecret(event, suppliedValue, envName, scope) {
+async function verifyConfiguredSecret(
+  event,
+  suppliedValue,
+  envName,
+  scope,
+  { enforceLimit = true } = {},
+) {
   const expected = configuredSecret(envName)
   if (!expected) {
     return {
@@ -711,14 +716,34 @@ async function verifyConfiguredSecret(event, suppliedValue, envName, scope) {
     `${scope}:${clientKey}:${windowId}`,
   )
   const attempt = await getDocument('securityAttempts', attemptId)
+  const matches = secretsEqual(suppliedValue, expected)
+
+  if (matches) {
+    if (attempt) {
+      const { _id: _ignoredId, ...attemptData } = attempt
+      await db.collection('securityAttempts').doc(attemptId).set({
+        ...attemptData,
+        count: 0,
+        updatedAt: nowIso(),
+      })
+    }
+    return { valid: true, response: null }
+  }
+
   if ((attempt?.count || 0) >= MAX_SECURITY_ATTEMPTS) {
+    if (!enforceLimit) {
+      return {
+        valid: false,
+        response: fail('INVALID_SECRET', '密钥错误'),
+      }
+    }
     return {
       valid: false,
       response: fail('TOO_MANY_ATTEMPTS', '尝试次数过多，请稍后再试'),
     }
   }
 
-  if (!secretsEqual(suppliedValue, expected)) {
+  if (enforceLimit) {
     await db.collection('securityAttempts').doc(attemptId).set({
       scope,
       clientIpHash: clientKey,
@@ -726,21 +751,11 @@ async function verifyConfiguredSecret(event, suppliedValue, envName, scope) {
       count: (attempt?.count || 0) + 1,
       updatedAt: nowIso(),
     })
-    return {
-      valid: false,
-      response: fail('INVALID_SECRET', '密钥错误'),
-    }
   }
-
-  if (attempt) {
-    const { _id: _ignoredId, ...attemptData } = attempt
-    await db.collection('securityAttempts').doc(attemptId).set({
-      ...attemptData,
-      count: 0,
-      updatedAt: nowIso(),
-    })
+  return {
+    valid: false,
+    response: fail('INVALID_SECRET', '密钥错误'),
   }
-  return { valid: true, response: null }
 }
 
 async function getRoomVerificationRollout() {
@@ -2033,8 +2048,14 @@ async function handleAdminCreateOwnerRecoveryCode(event) {
     event.creatorKey,
     'DORMSYNC_CREATOR_KEY',
     'admin-owner-recovery-creator',
+    { enforceLimit: false },
   )
-  if (!creatorCheck.valid) return creatorCheck.response
+  if (!creatorCheck.valid) {
+    if (creatorCheck.response?.error?.code === 'INVALID_SECRET') {
+      return fail('INVALID_SECRET', '寝室创建密钥不正确')
+    }
+    return creatorCheck.response
+  }
 
   const room = await getRoom(cleanText(event.roomId, 100))
   if (!room || room.closed) {

@@ -272,6 +272,58 @@ async function run() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     expectError(
       await invoke({
+        action: 'adminCreateOwnerRecoveryCode',
+        adminKey: 'wrong-admin-key',
+        creatorKey: 'test-creator-key',
+        roomId: created.state.room.id,
+        clientIp: 'admin-rescue-correct-key-ip',
+      }),
+      'INVALID_SECRET',
+    )
+  }
+  const rescueAfterAdminFailures = ok(
+    await invoke({
+      action: 'adminCreateOwnerRecoveryCode',
+      adminKey: 'test-admin-key',
+      creatorKey: 'test-creator-key',
+      roomId: created.state.room.id,
+      clientIp: 'admin-rescue-correct-key-ip',
+    }),
+    'admin rescue after previous failures',
+  )
+  if (rescueAfterAdminFailures.code.length !== 16) {
+    throw new Error('Correct admin key was blocked by previous failures')
+  }
+
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    expectError(
+      await invoke({
+        action: 'adminCreateOwnerRecoveryCode',
+        adminKey: 'test-admin-key',
+        creatorKey: 'wrong-creator-key',
+        roomId: created.state.room.id,
+        clientIp: 'admin-rescue-correct-key-ip',
+      }),
+      'INVALID_SECRET',
+    )
+  }
+  const rescueAfterCreatorFailures = ok(
+    await invoke({
+      action: 'adminCreateOwnerRecoveryCode',
+      adminKey: 'test-admin-key',
+      creatorKey: 'test-creator-key',
+      roomId: created.state.room.id,
+      clientIp: 'admin-rescue-correct-key-ip',
+    }),
+    'admin rescue after wrong creator attempts',
+  )
+  if (rescueAfterCreatorFailures.code.length !== 16) {
+    throw new Error('Correct creator key was blocked by previous failures')
+  }
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    expectError(
+      await invoke({
         action: 'createRoom',
         roomName: `限流${attempt}`,
         nickname: `限流${attempt}`,
@@ -332,6 +384,7 @@ async function run() {
         adminListIsReadOnlyAndSanitized: true,
         adminOwnerRescueCode: true,
         adminOwnerRescueAudited: true,
+        correctRescueKeyBypassesAttemptLimit: true,
         failedAttemptsRateLimited: true,
         publicJoinRateLimited: true,
       },
