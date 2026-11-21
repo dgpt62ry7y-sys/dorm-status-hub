@@ -75,7 +75,12 @@ function createMemoryDatabase() {
       return {
         async get() {
           const row = rows(name).find((item) => item._id === id)
-          return { data: row ? [clone(row)] : [] }
+          if (!row) {
+            const error = new Error('Document not found')
+            error.code = 'DOCUMENT_NOT_FOUND'
+            throw error
+          }
+          return { data: [clone(row)] }
         },
         async set(value) {
           const index = rows(name).findIndex((item) => item._id === id)

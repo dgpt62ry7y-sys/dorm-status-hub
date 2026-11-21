@@ -725,17 +725,34 @@ async function ensureCollections() {
   await collectionsReady
 }
 
+function firstRecord(result) {
+  if (Array.isArray(result?.data)) return result.data[0] ?? null
+  return result?.data ?? null
+}
+
+function isDocumentNotFound(error) {
+  return (
+    error?.code === 'DOCUMENT_NOT_FOUND' ||
+    String(error?.message || '').toLowerCase().includes('document not found')
+  )
+}
+
 async function getDocument(collectionName, id) {
   try {
     const result = await db.collection(collectionName).doc(id).get()
-    return result.data?.[0] ?? null
+    return firstRecord(result)
   } catch (error) {
-    if (
-      error?.code === 'DOCUMENT_NOT_FOUND' ||
-      String(error?.message || '').toLowerCase().includes('document not found')
-    ) {
-      return null
-    }
+    if (isDocumentNotFound(error)) return null
+    throw error
+  }
+}
+
+async function getTransactionDocument(transaction, collectionName, id) {
+  try {
+    const result = await transaction.collection(collectionName).doc(id).get()
+    return firstRecord(result)
+  } catch (error) {
+    if (isDocumentNotFound(error)) return null
     throw error
   }
 }
@@ -1618,11 +1635,11 @@ async function handleJoinRoom(event) {
   try {
     const joined = await db.runTransaction(async (transaction) => {
       const requestId = hashToken(`join-request:${joinRequestId}`)
-      const requestResult = await transaction
-        .collection('joinRequests')
-        .doc(requestId)
-        .get()
-      const existingRequest = requestResult.data?.[0]
+      const existingRequest = await getTransactionDocument(
+        transaction,
+        'joinRequests',
+        requestId,
+      )
       const deviceInstanceIdHash = hashToken(deviceInstanceId)
       if (existingRequest) {
         if (existingRequest.deviceInstanceIdHash !== deviceInstanceIdHash) {
