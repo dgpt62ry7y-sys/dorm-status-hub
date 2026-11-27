@@ -44,7 +44,7 @@
     "deploy": "npm run build && npm run deploy:api && npm run deploy:web"
   },
   "dependencies": {
-    "@lucide/vue": "^1.77.0",
+    "@lucide/vue": "^1.78.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0"
   },
